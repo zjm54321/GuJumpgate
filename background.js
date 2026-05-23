@@ -63,7 +63,9 @@ importScripts(
   'luckmail-utils.js',
   'cloudflare-temp-email-utils.js',
   'cloudmail-utils.js',
+  'outlook-email-plus-utils.js',
   'background/cloudmail-provider.js',
+  'background/outlook-email-plus-provider.js',
   'icloud-utils.js',
   'mail-provider-utils.js',
   'content/activation-utils.js'
@@ -319,6 +321,25 @@ const {
   normalizeCloudMailMailApiMessages,
 } = self.CloudMailUtils;
 const {
+  DEFAULT_OUTLOOK_EMAIL_PLUS_BASE_URL,
+  buildOutlookEmailPlusAliasAddress,
+  buildOutlookEmailPlusHeaders,
+  buildOutlookEmailPlusPayPalAliasAddress,
+  deriveOutlookEmailPlusBaseAddress,
+  generateOutlookEmailPlusTag,
+  getOutlookEmailPlusPayPalAliasIndex,
+  isOutlookEmailPlusTaggedAlias,
+  joinOutlookEmailPlusUrl,
+  normalizeOutlookEmailPlusAddress,
+  normalizeOutlookEmailPlusBaseUrl,
+  normalizeOutlookEmailPlusCallerIdPrefix,
+  normalizeOutlookEmailPlusClaim,
+  normalizeOutlookEmailPlusProjectKey,
+  normalizeOutlookEmailPlusProvider,
+  normalizeOutlookEmailPlusVerificationCode,
+  unwrapOutlookEmailPlusResponse,
+} = self.OutlookEmailPlusUtils;
+const {
   findIcloudAliasByEmail,
   getConfiguredIcloudHostPreference,
   getIcloudHostHintFromMessage,
@@ -462,6 +483,8 @@ const CLOUDFLARE_TEMP_EMAIL_PROVIDER = 'cloudflare-temp-email';
 const CLOUDFLARE_TEMP_EMAIL_GENERATOR = 'cloudflare-temp-email';
 const CLOUD_MAIL_PROVIDER = 'cloudmail';
 const CLOUD_MAIL_GENERATOR = 'cloudmail';
+const OUTLOOK_EMAIL_PLUS_PROVIDER = 'outlook-email-plus';
+const OUTLOOK_EMAIL_PLUS_GENERATOR = 'outlook-email-plus';
 const CUSTOM_EMAIL_POOL_GENERATOR = 'custom-pool';
 const HOTMAIL_MAILBOXES = ['INBOX', 'Junk'];
 const STOP_ERROR_MESSAGE = '流程已被用户停止。';
@@ -1117,6 +1140,12 @@ const PERSISTED_SETTING_DEFAULTS = {
   cloudMailReceiveMailbox: '',
   cloudMailDomain: '',
   cloudMailDomains: [],
+  outlookEmailPlusBaseUrl: DEFAULT_OUTLOOK_EMAIL_PLUS_BASE_URL,
+  outlookEmailPlusApiKey: '',
+  outlookEmailPlusProvider: 'outlook',
+  outlookEmailPlusProjectKey: 'openai',
+  outlookEmailPlusCallerIdPrefix: 'gujumpgate',
+  outlookEmailPlusAliasMaxPerMailbox: OUTLOOK_ALIAS_DEFAULT_MAX_PER_ACCOUNT,
   hotmailAccounts: [],
   hotmailAliasEnabled: false,
   outlookAliasMaxPerAccount: OUTLOOK_ALIAS_DEFAULT_MAX_PER_ACCOUNT,
@@ -2321,6 +2350,7 @@ function normalizeEmailGenerator(value = '') {
   if (normalized === 'cloudflare') return 'cloudflare';
   if (normalized === CLOUDFLARE_TEMP_EMAIL_GENERATOR) return CLOUDFLARE_TEMP_EMAIL_GENERATOR;
   if (normalized === 'cloudmail') return 'cloudmail';
+  if (normalized === OUTLOOK_EMAIL_PLUS_GENERATOR) return OUTLOOK_EMAIL_PLUS_GENERATOR;
   return 'duck';
 }
 
@@ -2543,6 +2573,13 @@ async function markCurrentRegistrationAccountUsed(state = {}, options = {}) {
   const icloudResult = await finalizeIcloudAliasAfterSuccessfulFlow(latestState);
   updated = Boolean(icloudResult?.handled) || updated;
 
+  const outlookEmailPlusResult = await markCurrentOutlookEmailPlusAliasUsed(latestState, {
+    logPrefix: reasonPrefix,
+    level: options.level || 'warn',
+    result: 'success',
+  });
+  updated = Boolean(outlookEmailPlusResult?.handled) || updated;
+
   if (typeof markCurrentCustomEmailPoolEntryUsed === 'function') {
     const result = await markCurrentCustomEmailPoolEntryUsed(latestState, {
       logPrefix: `${reasonPrefix}：自定义邮箱池`,
@@ -2622,6 +2659,7 @@ function normalizeMailProvider(value = '') {
     case LUCKMAIL_PROVIDER:
     case CLOUDFLARE_TEMP_EMAIL_PROVIDER:
     case CLOUD_MAIL_PROVIDER:
+    case OUTLOOK_EMAIL_PLUS_PROVIDER:
     case '163':
     case '163-vip':
     case '126':
@@ -2859,6 +2897,41 @@ const {
   pollCloudMailVerificationCode,
   resolveCloudMailPollTargetEmail,
 } = cloudMailProvider;
+const outlookEmailPlusProvider = self.MultiPageBackgroundOutlookEmailPlusProvider.createOutlookEmailPlusProvider({
+  addLog,
+  buildOutlookEmailPlusAliasAddress,
+  buildOutlookEmailPlusHeaders,
+  buildOutlookEmailPlusPayPalAliasAddress,
+  deriveOutlookEmailPlusBaseAddress,
+  generateOutlookEmailPlusTag,
+  getOutlookEmailPlusPayPalAliasIndex,
+  isOutlookEmailPlusTaggedAlias,
+  joinOutlookEmailPlusUrl,
+  normalizeOutlookEmailPlusAddress,
+  normalizeOutlookEmailPlusBaseUrl,
+  normalizeOutlookEmailPlusCallerIdPrefix,
+  normalizeOutlookEmailPlusClaim,
+  normalizeOutlookEmailPlusProjectKey,
+  normalizeOutlookEmailPlusProvider,
+  normalizeOutlookEmailPlusVerificationCode,
+  OUTLOOK_EMAIL_PLUS_GENERATOR,
+  OUTLOOK_EMAIL_PLUS_PROVIDER,
+  getState,
+  persistRegistrationEmailState,
+  setEmailState,
+  setState,
+  sleepWithStop,
+  throwIfStopped,
+  unwrapOutlookEmailPlusResponse,
+});
+const {
+  claimOutlookEmailPlusAddress,
+  completeOutlookEmailPlusClaim,
+  getOutlookEmailPlusConfig,
+  markOutlookEmailPlusAliasUsed,
+  pollOutlookEmailPlusVerificationCode,
+  releaseOutlookEmailPlusClaim,
+} = outlookEmailPlusProvider;
 
 function normalizeSub2ApiGroupNames(value = '') {
   const source = Array.isArray(value)
@@ -3240,6 +3313,9 @@ function normalizePersistentSettingValue(key, value) {
         if (normalizedMailProvider === CLOUD_MAIL_PROVIDER) {
           return CLOUD_MAIL_PROVIDER;
         }
+        if (normalizedMailProvider === OUTLOOK_EMAIL_PLUS_PROVIDER) {
+          return OUTLOOK_EMAIL_PLUS_PROVIDER;
+        }
         return HOTMAIL_PROVIDER;
       }
     case 'mail2925Mode':
@@ -3330,6 +3406,21 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeCloudMailDomain(value);
     case 'cloudMailDomains':
       return normalizeCloudMailDomains(value);
+    case 'outlookEmailPlusBaseUrl':
+      return normalizeOutlookEmailPlusBaseUrl(value);
+    case 'outlookEmailPlusApiKey':
+      return String(value || '').trim();
+    case 'outlookEmailPlusProvider':
+      return normalizeOutlookEmailPlusProvider(value) || PERSISTED_SETTING_DEFAULTS.outlookEmailPlusProvider;
+    case 'outlookEmailPlusProjectKey':
+      return normalizeOutlookEmailPlusProjectKey(value) || PERSISTED_SETTING_DEFAULTS.outlookEmailPlusProjectKey;
+    case 'outlookEmailPlusCallerIdPrefix':
+      return normalizeOutlookEmailPlusCallerIdPrefix(value) || PERSISTED_SETTING_DEFAULTS.outlookEmailPlusCallerIdPrefix;
+    case 'outlookEmailPlusAliasMaxPerMailbox':
+      return normalizeOutlookAliasMaxPerAccount(
+        value,
+        PERSISTED_SETTING_DEFAULTS.outlookEmailPlusAliasMaxPerMailbox
+      );
     case 'hotmailAccounts':
       return normalizeHotmailAccounts(value);
     case 'hotmailAliasEnabled':
@@ -4758,6 +4849,160 @@ function isLuckmailProvider(stateOrProvider) {
     ? stateOrProvider
     : stateOrProvider?.mailProvider;
   return provider === LUCKMAIL_PROVIDER;
+}
+
+function isOutlookEmailPlusProvider(stateOrProvider) {
+  const provider = typeof stateOrProvider === 'string'
+    ? stateOrProvider
+    : stateOrProvider?.mailProvider;
+  return provider === OUTLOOK_EMAIL_PLUS_PROVIDER;
+}
+
+function hasCurrentOutlookEmailPlusClaim(state = {}) {
+  return isOutlookEmailPlusProvider(state)
+    && Boolean(state.currentOutlookEmailPlusClaim?.address || state.currentOutlookEmailPlusClaim?.accountId);
+}
+
+function getOutlookEmailPlusClaimIdentity(claim = {}) {
+  return String(claim?.taskId || claim?.accountId || claim?.address || '')
+    .trim()
+    .toLowerCase();
+}
+
+function isSameOutlookEmailPlusClaim(left = {}, right = {}) {
+  const leftIdentity = getOutlookEmailPlusClaimIdentity(left);
+  const rightIdentity = getOutlookEmailPlusClaimIdentity(right);
+  return Boolean(leftIdentity && rightIdentity && leftIdentity === rightIdentity);
+}
+
+async function completeCurrentOutlookEmailPlusClaim(state = {}, options = {}) {
+  if (!hasCurrentOutlookEmailPlusClaim(state) || typeof completeOutlookEmailPlusClaim !== 'function') {
+    return { handled: false, reason: 'missing_claim' };
+  }
+  try {
+    const result = await completeOutlookEmailPlusClaim(state, {
+      result: options.result || 'success',
+    });
+    if (result?.completed) {
+      const logPrefix = String(options.logPrefix || '').trim() || 'Outlook Email Plus';
+      await addLog(`${logPrefix}：Outlook Email Plus 邮箱认领已完成。`, options.level || 'ok');
+      return { handled: true, result };
+    }
+    if (result?.reason === 'missing_claim_token') {
+      const refreshedState = await getState();
+      if (isSameOutlookEmailPlusClaim(state.currentOutlookEmailPlusClaim, refreshedState.currentOutlookEmailPlusClaim)) {
+        await addLog('Outlook Email Plus：缺少认领令牌，无法通知服务端完成认领，可能是扩展后台已重启。', 'warn');
+      }
+    }
+    return { handled: false, result };
+  } catch (error) {
+    await addLog(`Outlook Email Plus：完成认领回调失败：${error?.message || error}`, 'warn');
+    return { handled: false, error };
+  }
+}
+
+async function markCurrentOutlookEmailPlusAliasUsed(state = {}, options = {}) {
+  if (!hasCurrentOutlookEmailPlusClaim(state) || typeof markOutlookEmailPlusAliasUsed !== 'function') {
+    return { handled: false, reason: 'missing_claim' };
+  }
+  const logPrefix = String(options.logPrefix || '').trim() || 'Outlook Email Plus';
+  try {
+    const result = await markOutlookEmailPlusAliasUsed(state);
+    if (!result?.handled) {
+      return { handled: false, result };
+    }
+    if (!result.alreadyUsed) {
+      await addLog(
+        `${logPrefix}：Outlook Email Plus 别名 ${result.registrationEmail || ''} 已标记为已用（${result.aliasIndex}/${result.aliasMax}）。`,
+        options.level || 'warn'
+      );
+    }
+    if (result.exhausted) {
+      const completion = await completeCurrentOutlookEmailPlusClaim(state, {
+        logPrefix,
+        level: options.level,
+        result: options.result || 'success',
+      });
+      return {
+        handled: true,
+        result,
+        completion,
+        exhausted: true,
+      };
+    }
+    if (!result.alreadyUsed) {
+      await addLog(
+        `${logPrefix}：当前 Outlook Email Plus 邮箱还可继续分配后续别名。`,
+        'info'
+      );
+    }
+    return {
+      handled: true,
+      result,
+      exhausted: false,
+    };
+  } catch (error) {
+    await addLog(`Outlook Email Plus：标记别名已用失败：${error?.message || error}`, 'warn');
+    return { handled: false, error };
+  }
+}
+
+async function releaseCurrentOutlookEmailPlusClaim(state = {}, options = {}) {
+  if (!hasCurrentOutlookEmailPlusClaim(state) || typeof releaseOutlookEmailPlusClaim !== 'function') {
+    return { handled: false, reason: 'missing_claim' };
+  }
+  try {
+    const result = await releaseOutlookEmailPlusClaim(state, {
+      reason: options.reason || 'flow_abandoned',
+    });
+    if (result?.released) {
+      return { handled: true, result };
+    }
+    if (result?.reason === 'missing_claim_token') {
+      const refreshedState = await getState();
+      if (isSameOutlookEmailPlusClaim(state.currentOutlookEmailPlusClaim, refreshedState.currentOutlookEmailPlusClaim)) {
+        await addLog('Outlook Email Plus：缺少认领令牌，无法通知服务端释放认领，可能是扩展后台已重启。', 'warn');
+      }
+    }
+    return { handled: false, result };
+  } catch (error) {
+    await addLog(`Outlook Email Plus：释放认领回调失败：${error?.message || error}`, 'warn');
+    return { handled: false, error };
+  }
+}
+
+function getOutlookEmailPlusLifecycleAction(status = '') {
+  const normalizedStatus = String(status || '').trim().toLowerCase();
+  if (normalizedStatus === 'success') {
+    return 'complete';
+  }
+  if (
+    normalizedStatus === 'failed'
+    || normalizedStatus === 'stopped'
+    || normalizedStatus.includes(':failed')
+    || normalizedStatus.includes(':stopped')
+    || normalizedStatus.endsWith('_failed')
+    || normalizedStatus.endsWith('_stopped')
+  ) {
+    return 'release';
+  }
+  return '';
+}
+
+async function finalizeOutlookEmailPlusClaimForAccountRunRecord(status, state = {}, reason = '') {
+  const action = getOutlookEmailPlusLifecycleAction(status);
+  if (!action || !hasCurrentOutlookEmailPlusClaim(state)) {
+    return { handled: false };
+  }
+  if (action === 'complete') {
+    return markCurrentOutlookEmailPlusAliasUsed(state, {
+      logPrefix: '流程完成',
+      result: 'success',
+    });
+  }
+  return releaseCurrentOutlookEmailPlusClaim(state, {
+    reason: String(reason || status || 'flow_abandoned').trim() || 'flow_abandoned',
+  });
 }
 
 function isCustomMailProvider(stateOrProvider) {
@@ -9255,6 +9500,7 @@ function getSourceLabel(source) {
     'luckmail-api': 'LuckMail（API 购邮）',
     'cloudflare-temp-email': 'Cloudflare Temp Email',
     'cloudmail': 'Cloud Mail',
+    'outlook-email-plus': 'Outlook Email Plus',
     'plus-checkout': 'Plus Checkout',
     'paypal-flow': 'PayPal 授权页',
     'gopay-flow': 'GoPay 授权页',
@@ -11216,10 +11462,6 @@ async function failNodeFromBackground(nodeId, errorLike = '未知错误') {
 }
 
 async function appendManualAccountRunRecordIfNeeded(status, stateOverride = null, reason = '') {
-  if (!accountRunHistoryHelpers?.appendAccountRunRecord) {
-    return null;
-  }
-
   const state = stateOverride || await getState();
   return appendAndBroadcastAccountRunRecord(status, state, reason);
 }
@@ -11850,6 +12092,7 @@ function getEmailGeneratorLabel(generator) {
   if (generator === 'cloudflare') return 'Cloudflare 邮箱';
   if (generator === CLOUDFLARE_TEMP_EMAIL_GENERATOR) return 'Cloudflare Temp Email';
   if (generator === CLOUD_MAIL_GENERATOR) return 'Cloud Mail';
+  if (generator === OUTLOOK_EMAIL_PLUS_GENERATOR) return 'Outlook Email Plus';
   return 'Duck 邮箱';
 }
 const mail2925SessionManager = self.MultiPageBackgroundMail2925Session?.createMail2925SessionManager({
@@ -12027,6 +12270,9 @@ async function fetchDuckEmail(options = {}) {
 async function fetchGeneratedEmail(state, options = {}) {
   const currentState = state || await getState();
   const generator = normalizeEmailGenerator(options.generator ?? currentState.emailGenerator);
+  if (generator === OUTLOOK_EMAIL_PLUS_GENERATOR) {
+    return claimOutlookEmailPlusAddress(currentState, options);
+  }
   if (generator === CLOUD_MAIL_GENERATOR) {
     return fetchCloudMailAddress(currentState, options);
   }
@@ -12106,13 +12352,13 @@ async function broadcastAccountRunHistoryUpdate() {
 }
 
 async function appendAndBroadcastAccountRunRecord(status, stateOverride = null, reason = '') {
-  if (!accountRunHistoryHelpers?.appendAccountRunRecord) {
-    return null;
-  }
-
   const state = stateOverride || await getState();
   const resolvedStatus = resolveAccountRunRecordStatusForStop(status, state);
   const resolvedReason = resolveAccountRunRecordReasonForStop(resolvedStatus, reason);
+  await finalizeOutlookEmailPlusClaimForAccountRunRecord(resolvedStatus, state, resolvedReason);
+  if (!accountRunHistoryHelpers?.appendAccountRunRecord) {
+    return null;
+  }
   const record = await accountRunHistoryHelpers.appendAccountRunRecord(resolvedStatus, state, resolvedReason);
   if (!record) {
     return null;
@@ -13520,6 +13766,7 @@ const verificationFlowHelpers = self.MultiPageBackgroundVerificationFlow?.create
   closeConflictingTabsForSource,
   CLOUDFLARE_TEMP_EMAIL_PROVIDER,
   CLOUD_MAIL_PROVIDER,
+  OUTLOOK_EMAIL_PLUS_PROVIDER,
   completeNodeFromBackground,
   confirmCustomVerificationStepBypassRequest: (step) => chrome.runtime.sendMessage({
     type: 'REQUEST_CUSTOM_VERIFICATION_BYPASS_CONFIRMATION',
@@ -13540,6 +13787,7 @@ const verificationFlowHelpers = self.MultiPageBackgroundVerificationFlow?.create
   MAIL_2925_VERIFICATION_MAX_ATTEMPTS,
   pollCloudflareTempEmailVerificationCode,
   pollCloudMailVerificationCode,
+  pollOutlookEmailPlusVerificationCode,
   pollHotmailVerificationCode,
   pollLuckmailVerificationCode,
   sendToContentScript,
@@ -13671,6 +13919,7 @@ const step4Executor = self.MultiPageBackgroundStep4?.createStep4Executor({
   LUCKMAIL_PROVIDER,
   CLOUDFLARE_TEMP_EMAIL_PROVIDER,
   CLOUD_MAIL_PROVIDER,
+  OUTLOOK_EMAIL_PLUS_PROVIDER,
   resolveVerificationStep: verificationFlowHelpers.resolveVerificationStep,
   reuseOrCreateTab,
   sendToContentScript,
@@ -13729,6 +13978,7 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
   chrome,
   CLOUDFLARE_TEMP_EMAIL_PROVIDER,
   CLOUD_MAIL_PROVIDER,
+  OUTLOOK_EMAIL_PLUS_PROVIDER,
   completeNodeFromBackground,
   confirmCustomVerificationStepBypass: verificationFlowHelpers.confirmCustomVerificationStepBypass,
   ensureMail2925MailboxSession,
@@ -14343,8 +14593,11 @@ function getMailConfig(state) {
   if (provider === CLOUDFLARE_TEMP_EMAIL_PROVIDER) {
     return { provider: CLOUDFLARE_TEMP_EMAIL_PROVIDER, label: 'Cloudflare Temp Email' };
   }
-  if (provider === 'cloudmail') {
-    return { provider: 'cloudmail', label: 'Cloud Mail' };
+  if (provider === CLOUD_MAIL_PROVIDER) {
+    return { provider: CLOUD_MAIL_PROVIDER, label: 'Cloud Mail' };
+  }
+  if (provider === OUTLOOK_EMAIL_PLUS_PROVIDER) {
+    return { provider: OUTLOOK_EMAIL_PLUS_PROVIDER, label: 'Outlook Email Plus' };
   }
   if (provider === '163') {
     return { source: 'mail-163', url: 'https://mail.163.com/js6/main.jsp?df=mail163_letter#module=mbox.ListModule%7C%7B%22fid%22%3A1%2C%22order%22%3A%22date%22%2C%22desc%22%3Atrue%7D', label: '163 邮箱' };
