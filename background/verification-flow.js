@@ -12,6 +12,7 @@
       closeConflictingTabsForSource,
       CLOUDFLARE_TEMP_EMAIL_PROVIDER,
       CLOUD_MAIL_PROVIDER = 'cloudmail',
+      OUTLOOK_EMAIL_PLUS_PROVIDER = 'outlook-email-plus',
       completeNodeFromBackground,
       confirmCustomVerificationStepBypassRequest,
       getNodeIdByStepForState,
@@ -28,6 +29,7 @@
       MAIL_2925_VERIFICATION_MAX_ATTEMPTS,
       pollCloudflareTempEmailVerificationCode,
       pollCloudMailVerificationCode,
+      pollOutlookEmailPlusVerificationCode,
       pollHotmailVerificationCode,
       pollLuckmailVerificationCode,
       sendToContentScript,
@@ -984,6 +986,13 @@
           ...cleanPollOverrides,
         }, cleanPollOverrides, `轮询${getVerificationCodeLabel(step)}验证码邮箱`);
         return pollCloudMailVerificationCode(step, state, timedPoll.payload);
+      }
+      if (mail.provider === OUTLOOK_EMAIL_PLUS_PROVIDER) {
+        const timedPoll = await applyMailPollingTimeBudget(step, {
+          ...getVerificationPollPayload(step, state),
+          ...cleanPollOverrides,
+        }, cleanPollOverrides, `轮询${getVerificationCodeLabel(step)}验证码邮箱`);
+        return pollOutlookEmailPlusVerificationCode(step, state, timedPoll.payload);
       }
 
       if (Number(pollOverrides.resendIntervalMs) > 0) {
