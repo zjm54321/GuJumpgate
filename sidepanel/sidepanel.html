@@ -553,6 +553,7 @@
             <option value="hotmail-api">Outlook/Hotmail 账号池</option>
             <option value="cloudflare-temp-email">Cloudflare Temp Email</option>
             <option value="cloudmail">Cloud Mail</option>
+            <option value="outlook-email-plus">Outlook Email Plus</option>
           </select>
           <button id="btn-mail-login" class="btn btn-outline btn-sm data-inline-btn" type="button" disabled>登录</button>
         </div>
@@ -579,6 +580,7 @@
           <option value="icloud">iCloud 隐私邮箱</option>
           <option value="cloudflare-temp-email">Cloudflare Temp Email</option>
           <option value="cloudmail">Cloud Mail</option>
+          <option value="outlook-email-plus">Outlook Email Plus</option>
         </select>
       </div>
       <div class="data-row data-check-row" id="row-custom-email-pool" style="display:none;">
@@ -919,6 +921,51 @@
       <div class="data-row" id="row-cloud-mail-domain" style="display:none;">
         <span class="data-label">域名</span>
         <input type="text" id="input-cloud-mail-domain" class="data-input" placeholder="例如 mail.example.com" />
+      </div>
+    </div>
+    <div id="outlook-email-plus-section" class="data-card hotmail-card" style="display:none;">
+      <div class="section-mini-header">
+        <div class="section-mini-copy">
+          <span class="section-label">Outlook Email Plus</span>
+          <span class="data-value">通过外部 API 认领 Outlook 邮箱池账号并收码</span>
+        </div>
+        <div class="section-mini-actions">
+          <button id="btn-outlook-email-plus-github" class="btn btn-ghost btn-xs" type="button">部署</button>
+        </div>
+      </div>
+      <div class="data-row" id="row-outlook-email-plus-base-url" style="display:none;">
+        <span class="data-label">API 地址</span>
+        <input type="text" id="input-outlook-email-plus-base-url" class="data-input" placeholder="http://127.0.0.1:5000" />
+      </div>
+      <div class="data-row" id="row-outlook-email-plus-api-key" style="display:none;">
+        <span class="data-label">API Key</span>
+        <div class="input-with-icon">
+          <input type="password" id="input-outlook-email-plus-api-key" class="data-input data-input-with-icon"
+            placeholder="Outlook Email Plus API Key" />
+          <button id="btn-toggle-outlook-email-plus-api-key" class="input-icon-btn" type="button"
+            data-password-toggle="input-outlook-email-plus-api-key" data-show-label="显示 API Key"
+            data-hide-label="隐藏 API Key" aria-label="显示 API Key" title="显示 API Key"></button>
+        </div>
+      </div>
+      <div class="data-row" id="row-outlook-email-plus-provider" style="display:none;">
+        <span class="data-label">Provider</span>
+        <input type="text" id="input-outlook-email-plus-provider" class="data-input" placeholder="outlook" />
+      </div>
+      <div class="data-row" id="row-outlook-email-plus-project-key" style="display:none;">
+        <span class="data-label">项目</span>
+        <input type="text" id="input-outlook-email-plus-project-key" class="data-input" placeholder="openai" />
+      </div>
+      <div class="data-row" id="row-outlook-email-plus-caller-id-prefix" style="display:none;">
+        <span class="data-label">调用方</span>
+        <input type="text" id="input-outlook-email-plus-caller-id-prefix" class="data-input" placeholder="gujumpgate" />
+      </div>
+      <div class="data-row" id="row-outlook-email-plus-alias-max" style="display:none;">
+        <span class="data-label">别名上限</span>
+        <div class="data-inline">
+          <input type="number" id="input-outlook-email-plus-alias-max-per-mailbox" class="data-input auto-delay-input"
+            value="5" min="1" max="50" step="1" title="每个 Outlook Email Plus 认领邮箱最多使用多少个 +PayPalN 别名" />
+          <span class="setting-caption">用完后自动结束当前邮箱并认领下一个</span>
+        </div>
       </div>
     </div>
     <div id="hotmail-section" class="data-card hotmail-card" style="display:none;">

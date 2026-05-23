@@ -319,6 +319,20 @@ const inputCloudMailAdminEmail = document.getElementById('input-cloud-mail-admin
 const inputCloudMailAdminPassword = document.getElementById('input-cloud-mail-admin-password');
 const inputCloudMailReceiveMailbox = document.getElementById('input-cloud-mail-receive-mailbox');
 const inputCloudMailDomain = document.getElementById('input-cloud-mail-domain');
+const outlookEmailPlusSection = document.getElementById('outlook-email-plus-section');
+const btnOutlookEmailPlusGithub = document.getElementById('btn-outlook-email-plus-github');
+const rowOutlookEmailPlusBaseUrl = document.getElementById('row-outlook-email-plus-base-url');
+const rowOutlookEmailPlusApiKey = document.getElementById('row-outlook-email-plus-api-key');
+const rowOutlookEmailPlusProvider = document.getElementById('row-outlook-email-plus-provider');
+const rowOutlookEmailPlusProjectKey = document.getElementById('row-outlook-email-plus-project-key');
+const rowOutlookEmailPlusCallerIdPrefix = document.getElementById('row-outlook-email-plus-caller-id-prefix');
+const rowOutlookEmailPlusAliasMax = document.getElementById('row-outlook-email-plus-alias-max');
+const inputOutlookEmailPlusBaseUrl = document.getElementById('input-outlook-email-plus-base-url');
+const inputOutlookEmailPlusApiKey = document.getElementById('input-outlook-email-plus-api-key');
+const inputOutlookEmailPlusProvider = document.getElementById('input-outlook-email-plus-provider');
+const inputOutlookEmailPlusProjectKey = document.getElementById('input-outlook-email-plus-project-key');
+const inputOutlookEmailPlusCallerIdPrefix = document.getElementById('input-outlook-email-plus-caller-id-prefix');
+const inputOutlookEmailPlusAliasMaxPerMailbox = document.getElementById('input-outlook-email-plus-alias-max-per-mailbox');
 const hotmailSection = document.getElementById('hotmail-section');
 const mail2925Section = document.getElementById('mail2925-section');
 const luckmailSection = document.getElementById('luckmail-section');
@@ -1092,6 +1106,8 @@ const HOTMAIL_PROVIDER = 'hotmail-api';
 const LUCKMAIL_PROVIDER = 'luckmail-api';
 const CLOUDFLARE_TEMP_EMAIL_PROVIDER = 'cloudflare-temp-email';
 const CLOUD_MAIL_PROVIDER = 'cloudmail';
+const OUTLOOK_EMAIL_PLUS_PROVIDER = 'outlook-email-plus';
+const OUTLOOK_EMAIL_PLUS_GENERATOR = 'outlook-email-plus';
 const CUSTOM_EMAIL_POOL_GENERATOR = 'custom-pool';
 const DEFAULT_LUCKMAIL_BASE_URL = 'https://mails.luckyous.com';
 const DEFAULT_LUCKMAIL_EMAIL_TYPE = 'ms_graph';
@@ -1673,6 +1689,11 @@ const MAIL_PROVIDER_LOGIN_CONFIGS = {
   'cloudflare-temp-email': {
     label: 'Cloudflare Temp Email 部署',
     url: 'https://github.com/QLHazyCoder/cloudflare_temp_email',
+    buttonLabel: '部署',
+  },
+  [OUTLOOK_EMAIL_PLUS_PROVIDER]: {
+    label: 'Outlook Email Plus 部署',
+    url: 'https://github.com/ZeroPointSix/outlookEmailPlus',
     buttonLabel: '部署',
   },
   '2925': {
@@ -3131,6 +3152,9 @@ function normalizeSupportedMailProvider(value = '') {
   if (normalized === CLOUD_MAIL_PROVIDER) {
     return CLOUD_MAIL_PROVIDER;
   }
+  if (normalized === OUTLOOK_EMAIL_PLUS_PROVIDER) {
+    return OUTLOOK_EMAIL_PLUS_PROVIDER;
+  }
   return HOTMAIL_PROVIDER;
 }
 
@@ -3503,6 +3527,40 @@ function normalizeCloudMailDomainValue(value = '') {
   return normalizeCloudflareDomainValue(value);
 }
 
+function normalizeOutlookEmailPlusBaseUrlValue(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const candidate = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(raw) ? raw : `https://${raw}`;
+  try {
+    const parsed = new URL(candidate);
+    parsed.hash = '';
+    parsed.search = '';
+    let pathname = String(parsed.pathname || '').replace(/\/+/g, '/');
+    pathname = pathname.replace(/\/api\/external(?:\/.*)?$/i, '');
+    pathname = pathname === '/' ? '' : pathname.replace(/\/+$/g, '');
+    return `${parsed.origin}${pathname}`;
+  } catch (_error) {
+    return '';
+  }
+}
+
+function normalizeOutlookEmailPlusProviderValue(value = '') {
+  return String(value || '').trim().toLowerCase() || 'outlook';
+}
+
+function normalizeOutlookEmailPlusProjectKeyValue(value = '') {
+  return String(value || '').trim().toLowerCase() || 'openai';
+}
+
+function normalizeOutlookEmailPlusCallerIdPrefixValue(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^[-._]+|[-._]+$/g, '') || 'gujumpgate';
+}
+
 function getCloudflareDomainsFromState() {
   const domains = normalizeCloudflareDomains(latestState?.cloudflareDomains || []);
   const activeDomain = normalizeCloudflareDomainValue(latestState?.cloudflareDomain || '');
@@ -3593,6 +3651,29 @@ function applyCloudMailSettingsState(state = {}) {
   }
 }
 
+function applyOutlookEmailPlusSettingsState(state = {}) {
+  if (inputOutlookEmailPlusBaseUrl) {
+    inputOutlookEmailPlusBaseUrl.value = state?.outlookEmailPlusBaseUrl || '';
+  }
+  if (inputOutlookEmailPlusApiKey) {
+    inputOutlookEmailPlusApiKey.value = state?.outlookEmailPlusApiKey || '';
+  }
+  if (inputOutlookEmailPlusProvider) {
+    inputOutlookEmailPlusProvider.value = normalizeOutlookEmailPlusProviderValue(state?.outlookEmailPlusProvider);
+  }
+  if (inputOutlookEmailPlusProjectKey) {
+    inputOutlookEmailPlusProjectKey.value = normalizeOutlookEmailPlusProjectKeyValue(state?.outlookEmailPlusProjectKey);
+  }
+  if (inputOutlookEmailPlusCallerIdPrefix) {
+    inputOutlookEmailPlusCallerIdPrefix.value = normalizeOutlookEmailPlusCallerIdPrefixValue(state?.outlookEmailPlusCallerIdPrefix);
+  }
+  if (inputOutlookEmailPlusAliasMaxPerMailbox) {
+    inputOutlookEmailPlusAliasMaxPerMailbox.value = String(
+      normalizeOutlookAliasMaxPerAccount(state?.outlookEmailPlusAliasMaxPerMailbox)
+    );
+  }
+}
+
 function collectSettingsPayload() {
   const defaultGpcHelperApiUrl = typeof DEFAULT_GPC_HELPER_API_URL !== 'undefined'
     ? DEFAULT_GPC_HELPER_API_URL
@@ -3614,6 +3695,18 @@ function collectSettingsPayload() {
   const normalizeCloudMailDomainInput = typeof normalizeCloudMailDomainValue === 'function'
     ? normalizeCloudMailDomainValue
     : normalizeCloudflareTempEmailDomainValue;
+  const normalizeOutlookEmailPlusBaseUrlInput = typeof normalizeOutlookEmailPlusBaseUrlValue === 'function'
+    ? normalizeOutlookEmailPlusBaseUrlValue
+    : ((value = '') => String(value || '').trim().replace(/\/+$/g, ''));
+  const normalizeOutlookEmailPlusProviderInput = typeof normalizeOutlookEmailPlusProviderValue === 'function'
+    ? normalizeOutlookEmailPlusProviderValue
+    : ((value = '') => String(value || '').trim().toLowerCase() || 'outlook');
+  const normalizeOutlookEmailPlusProjectKeyInput = typeof normalizeOutlookEmailPlusProjectKeyValue === 'function'
+    ? normalizeOutlookEmailPlusProjectKeyValue
+    : ((value = '') => String(value || '').trim().toLowerCase() || 'openai');
+  const normalizeOutlookEmailPlusCallerIdPrefixInput = typeof normalizeOutlookEmailPlusCallerIdPrefixValue === 'function'
+    ? normalizeOutlookEmailPlusCallerIdPrefixValue
+    : ((value = '') => String(value || '').trim().toLowerCase() || 'gujumpgate');
   const contributionModeEnabled = Boolean(latestState?.contributionMode);
   const icloudFetchModeRawValue = typeof selectIcloudFetchMode !== 'undefined'
     ? String(selectIcloudFetchMode?.value || '')
@@ -4420,6 +4513,12 @@ function collectSettingsPayload() {
     cloudMailAdminPassword: (typeof inputCloudMailAdminPassword !== 'undefined' && inputCloudMailAdminPassword) ? inputCloudMailAdminPassword.value : '',
     cloudMailReceiveMailbox: normalizeCloudMailReceiveMailboxInput((typeof inputCloudMailReceiveMailbox !== 'undefined' && inputCloudMailReceiveMailbox) ? inputCloudMailReceiveMailbox.value : ''),
     cloudMailDomain: normalizeCloudMailDomainInput((typeof inputCloudMailDomain !== 'undefined' && inputCloudMailDomain) ? inputCloudMailDomain.value : ''),
+    outlookEmailPlusBaseUrl: normalizeOutlookEmailPlusBaseUrlInput((typeof inputOutlookEmailPlusBaseUrl !== 'undefined' && inputOutlookEmailPlusBaseUrl) ? inputOutlookEmailPlusBaseUrl.value : ''),
+    outlookEmailPlusApiKey: (typeof inputOutlookEmailPlusApiKey !== 'undefined' && inputOutlookEmailPlusApiKey) ? inputOutlookEmailPlusApiKey.value : '',
+    outlookEmailPlusProvider: normalizeOutlookEmailPlusProviderInput((typeof inputOutlookEmailPlusProvider !== 'undefined' && inputOutlookEmailPlusProvider) ? inputOutlookEmailPlusProvider.value : ''),
+    outlookEmailPlusProjectKey: normalizeOutlookEmailPlusProjectKeyInput((typeof inputOutlookEmailPlusProjectKey !== 'undefined' && inputOutlookEmailPlusProjectKey) ? inputOutlookEmailPlusProjectKey.value : ''),
+    outlookEmailPlusCallerIdPrefix: normalizeOutlookEmailPlusCallerIdPrefixInput((typeof inputOutlookEmailPlusCallerIdPrefix !== 'undefined' && inputOutlookEmailPlusCallerIdPrefix) ? inputOutlookEmailPlusCallerIdPrefix.value : ''),
+    outlookEmailPlusAliasMaxPerMailbox: normalizeOutlookAliasMaxPerAccount((typeof inputOutlookEmailPlusAliasMaxPerMailbox !== 'undefined' && inputOutlookEmailPlusAliasMaxPerMailbox) ? inputOutlookEmailPlusAliasMaxPerMailbox.value : 5),
     autoRunSkipFailures: inputAutoSkipFailures.checked,
     autoRunRetryNonFreeTrial: Boolean(inputAutoRunRetryNonFreeTrial?.checked),
     autoRunRetryPaypalCallback: Boolean(inputAutoRunRetryPaypalCallback?.checked),
@@ -10072,6 +10171,12 @@ function applySettingsState(state) {
     const cloudflareTempEmailProvider = typeof CLOUDFLARE_TEMP_EMAIL_PROVIDER === 'string'
       ? CLOUDFLARE_TEMP_EMAIL_PROVIDER
       : 'cloudflare-temp-email';
+    const outlookEmailPlusProvider = typeof OUTLOOK_EMAIL_PLUS_PROVIDER === 'string'
+      ? OUTLOOK_EMAIL_PLUS_PROVIDER
+      : 'outlook-email-plus';
+    const outlookEmailPlusGenerator = typeof OUTLOOK_EMAIL_PLUS_GENERATOR === 'string'
+      ? OUTLOOK_EMAIL_PLUS_GENERATOR
+      : 'outlook-email-plus';
     const gmailProvider = typeof GMAIL_PROVIDER === 'string'
       ? GMAIL_PROVIDER
       : 'gmail';
@@ -10084,6 +10189,8 @@ function applySettingsState(state) {
     const restoredEmailGenerator = String(state?.emailGenerator || '').trim().toLowerCase();
     if (restoredMailProvider === cloudflareTempEmailProvider) {
       selectEmailGenerator.value = 'cloudflare-temp-email';
+    } else if (restoredMailProvider === outlookEmailPlusProvider) {
+      selectEmailGenerator.value = outlookEmailPlusGenerator;
     } else if (restoredMailProvider === 'hotmail-api') {
       selectEmailGenerator.value = 'duck';
     } else if (restoredMailProvider === gmailProvider) {
@@ -10100,6 +10207,8 @@ function applySettingsState(state) {
       selectEmailGenerator.value = 'cloudflare-temp-email';
     } else if (restoredEmailGenerator === 'cloudmail') {
       selectEmailGenerator.value = 'cloudmail';
+    } else if (restoredEmailGenerator === outlookEmailPlusGenerator) {
+      selectEmailGenerator.value = outlookEmailPlusGenerator;
     } else {
       selectEmailGenerator.value = 'duck';
     }
@@ -10165,6 +10274,9 @@ function applySettingsState(state) {
   applyCloudflareTempEmailSettingsState(state);
   if (typeof applyCloudMailSettingsState === 'function') {
     applyCloudMailSettingsState(state);
+  }
+  if (typeof applyOutlookEmailPlusSettingsState === 'function') {
+    applyOutlookEmailPlusSettingsState(state);
   }
   renderCloudflareDomainOptions(state?.cloudflareDomain || '');
   setCloudflareDomainEditMode(false, { clearInput: true });
@@ -10969,6 +11081,7 @@ function getSelectedEmailGenerator() {
   if (generator === 'cloudflare') return 'cloudflare';
   if (generator === 'cloudflare-temp-email') return 'cloudflare-temp-email';
   if (generator === 'cloudmail') return 'cloudmail';
+  if (generator === OUTLOOK_EMAIL_PLUS_GENERATOR) return OUTLOOK_EMAIL_PLUS_GENERATOR;
   return 'duck';
 }
 
@@ -11022,6 +11135,14 @@ function getEmailGeneratorUiCopy() {
       placeholder: '点击生成 Cloud Mail 邮箱，或手动粘贴邮箱',
       successVerb: '生成',
       label: 'Cloud Mail',
+    };
+  }
+  if (getSelectedEmailGenerator() === OUTLOOK_EMAIL_PLUS_GENERATOR) {
+    return {
+      buttonLabel: '领取',
+      placeholder: '点击领取 Outlook Email Plus 邮箱，或手动粘贴邮箱',
+      successVerb: '领取',
+      label: 'Outlook Email Plus',
     };
   }
 
@@ -11421,6 +11542,7 @@ function updateMailProviderUI() {
   const useCustomEmail = isCustomMailProvider();
   const useCloudflareTempEmailProvider = selectMailProvider.value === 'cloudflare-temp-email';
   const useCloudMailProvider = selectMailProvider.value === 'cloudmail';
+  const useOutlookEmailPlusProvider = selectMailProvider.value === OUTLOOK_EMAIL_PLUS_PROVIDER;
   const gmailAliasGenerator = typeof GMAIL_ALIAS_GENERATOR === 'string'
     ? GMAIL_ALIAS_GENERATOR
     : 'gmail-alias';
@@ -11433,7 +11555,9 @@ function updateMailProviderUI() {
       ? new Set(['cloudflare-temp-email'])
       : (useCloudMailProvider
         ? new Set(['cloudmail'])
-        : (useGmail ? new Set([gmailAliasGenerator, customEmailPoolGenerator]) : null)));
+        : (useOutlookEmailPlusProvider
+          ? new Set([OUTLOOK_EMAIL_PLUS_GENERATOR])
+          : (useGmail ? new Set([gmailAliasGenerator, customEmailPoolGenerator]) : null))));
   Array.from(selectEmailGenerator?.options || []).forEach((option) => {
     if (!option) return;
     const optionValue = String(option.value || '').trim().toLowerCase();
@@ -11462,6 +11586,9 @@ function updateMailProviderUI() {
   if (useCloudMailProvider && String(selectEmailGenerator?.value || '').trim().toLowerCase() !== 'cloudmail') {
     selectEmailGenerator.value = 'cloudmail';
   }
+  if (useOutlookEmailPlusProvider && String(selectEmailGenerator?.value || '').trim().toLowerCase() !== OUTLOOK_EMAIL_PLUS_GENERATOR) {
+    selectEmailGenerator.value = OUTLOOK_EMAIL_PLUS_GENERATOR;
+  }
   const useEmailGenerator = !useHotmail && !useLuckmail && !useCustomEmail && (!useGeneratedAlias || useGmail);
   const aliasUiCopy = useGeneratedAlias
     ? getManagedAliasProviderUiCopy(selectMailProvider.value, mail2925Mode)
@@ -11486,6 +11613,7 @@ function updateMailProviderUI() {
   const useIcloud = selectedGenerator === 'icloud';
   const useCloudflareTempEmailGenerator = selectedGenerator === 'cloudflare-temp-email';
   const useCloudMailGenerator = selectedGenerator === 'cloudmail';
+  const useOutlookEmailPlusGenerator = selectedGenerator === OUTLOOK_EMAIL_PLUS_GENERATOR;
   const showCloudflareDomain = useEmailGenerator && useCloudflare;
   const showCloudflareTempEmailSettings = useCloudflareTempEmailProvider || (useEmailGenerator && useCloudflareTempEmailGenerator);
   const showCloudflareTempEmailLookupMode = useCloudflareTempEmailProvider;
@@ -11502,6 +11630,7 @@ function updateMailProviderUI() {
   const showCloudMailSettings = useCloudMailProvider || (useEmailGenerator && useCloudMailGenerator);
   const showCloudMailReceiveMailbox = useCloudMailProvider && !useCloudMailGenerator;
   const showCloudMailDomain = useEmailGenerator && useCloudMailGenerator;
+  const showOutlookEmailPlusSettings = useOutlookEmailPlusProvider || (useEmailGenerator && useOutlookEmailPlusGenerator);
   const selectedIcloudHost = typeof getSelectedIcloudHostPreference === 'function'
     ? getSelectedIcloudHostPreference()
     : (normalizeIcloudHostValue(icloudHostPreferenceValue || latestState?.icloudHostPreference || '')
@@ -11535,6 +11664,15 @@ function updateMailProviderUI() {
   if (typeof rowCloudMailAdminPassword !== 'undefined' && rowCloudMailAdminPassword) rowCloudMailAdminPassword.style.display = showCloudMailSettings ? '' : 'none';
   if (typeof rowCloudMailReceiveMailbox !== 'undefined' && rowCloudMailReceiveMailbox) rowCloudMailReceiveMailbox.style.display = showCloudMailReceiveMailbox ? '' : 'none';
   if (typeof rowCloudMailDomain !== 'undefined' && rowCloudMailDomain) rowCloudMailDomain.style.display = showCloudMailDomain ? '' : 'none';
+  if (typeof outlookEmailPlusSection !== 'undefined' && outlookEmailPlusSection) {
+    outlookEmailPlusSection.style.display = showOutlookEmailPlusSettings ? '' : 'none';
+  }
+  if (typeof rowOutlookEmailPlusBaseUrl !== 'undefined' && rowOutlookEmailPlusBaseUrl) rowOutlookEmailPlusBaseUrl.style.display = showOutlookEmailPlusSettings ? '' : 'none';
+  if (typeof rowOutlookEmailPlusApiKey !== 'undefined' && rowOutlookEmailPlusApiKey) rowOutlookEmailPlusApiKey.style.display = showOutlookEmailPlusSettings ? '' : 'none';
+  if (typeof rowOutlookEmailPlusProvider !== 'undefined' && rowOutlookEmailPlusProvider) rowOutlookEmailPlusProvider.style.display = showOutlookEmailPlusSettings ? '' : 'none';
+  if (typeof rowOutlookEmailPlusProjectKey !== 'undefined' && rowOutlookEmailPlusProjectKey) rowOutlookEmailPlusProjectKey.style.display = showOutlookEmailPlusSettings ? '' : 'none';
+  if (typeof rowOutlookEmailPlusCallerIdPrefix !== 'undefined' && rowOutlookEmailPlusCallerIdPrefix) rowOutlookEmailPlusCallerIdPrefix.style.display = showOutlookEmailPlusSettings ? '' : 'none';
+  if (typeof rowOutlookEmailPlusAliasMax !== 'undefined' && rowOutlookEmailPlusAliasMax) rowOutlookEmailPlusAliasMax.style.display = showOutlookEmailPlusSettings ? '' : 'none';
   if (icloudSection) {
     const showIcloudSection = (useEmailGenerator && useIcloud) || useIcloudProvider;
     icloudSection.style.display = showIcloudSection ? '' : 'none';
@@ -11602,6 +11740,7 @@ function updateMailProviderUI() {
     || useCustomEmail
     || useCloudflareTempEmailProvider
     || useCloudMailProvider
+    || useOutlookEmailPlusProvider
     || (useGeneratedAlias && !useGmail);
   if (useGmail) {
     labelEmailPrefix.textContent = 'Gmail 原邮箱';
@@ -13645,6 +13784,10 @@ btnCloudflareTempEmailUsageGuide?.addEventListener('click', () => {
 
 btnCloudflareTempEmailGithub?.addEventListener('click', () => {
   openCloudflareTempEmailRepositoryPage();
+});
+
+btnOutlookEmailPlusGithub?.addEventListener('click', () => {
+  openExternalUrl(MAIL_PROVIDER_LOGIN_CONFIGS[OUTLOOK_EMAIL_PLUS_PROVIDER]?.url || 'https://github.com/ZeroPointSix/outlookEmailPlus');
 });
 
 extensionUpdateStatus?.addEventListener('click', () => {
@@ -15841,6 +15984,17 @@ inputOutlookAliasMaxPerAccount?.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputOutlookEmailPlusAliasMaxPerMailbox?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputOutlookEmailPlusAliasMaxPerMailbox?.addEventListener('blur', () => {
+  inputOutlookEmailPlusAliasMaxPerMailbox.value = String(
+    normalizeOutlookAliasMaxPerAccount(inputOutlookEmailPlusAliasMaxPerMailbox.value)
+  );
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 inputHotmailAliasEnabled?.addEventListener('change', () => {
   updateMailProviderUI();
   markSettingsDirty(true);
@@ -16671,6 +16825,34 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       if (message.payload.cloudMailDomain !== undefined && inputCloudMailDomain) {
         inputCloudMailDomain.value = message.payload.cloudMailDomain || '';
+      }
+      if (message.payload.outlookEmailPlusBaseUrl !== undefined && inputOutlookEmailPlusBaseUrl) {
+        inputOutlookEmailPlusBaseUrl.value = message.payload.outlookEmailPlusBaseUrl || '';
+      }
+      if (message.payload.outlookEmailPlusApiKey !== undefined && inputOutlookEmailPlusApiKey) {
+        inputOutlookEmailPlusApiKey.value = message.payload.outlookEmailPlusApiKey || '';
+      }
+      if (message.payload.outlookEmailPlusProvider !== undefined && inputOutlookEmailPlusProvider) {
+        inputOutlookEmailPlusProvider.value = normalizeOutlookEmailPlusProviderValue(message.payload.outlookEmailPlusProvider);
+      }
+      if (message.payload.outlookEmailPlusProjectKey !== undefined && inputOutlookEmailPlusProjectKey) {
+        inputOutlookEmailPlusProjectKey.value = normalizeOutlookEmailPlusProjectKeyValue(message.payload.outlookEmailPlusProjectKey);
+      }
+      if (message.payload.outlookEmailPlusCallerIdPrefix !== undefined && inputOutlookEmailPlusCallerIdPrefix) {
+        inputOutlookEmailPlusCallerIdPrefix.value = normalizeOutlookEmailPlusCallerIdPrefixValue(message.payload.outlookEmailPlusCallerIdPrefix);
+      }
+      if (message.payload.outlookEmailPlusAliasMaxPerMailbox !== undefined && inputOutlookEmailPlusAliasMaxPerMailbox) {
+        inputOutlookEmailPlusAliasMaxPerMailbox.value = String(normalizeOutlookAliasMaxPerAccount(message.payload.outlookEmailPlusAliasMaxPerMailbox));
+      }
+      if (
+        message.payload.outlookEmailPlusBaseUrl !== undefined
+        || message.payload.outlookEmailPlusApiKey !== undefined
+        || message.payload.outlookEmailPlusProvider !== undefined
+        || message.payload.outlookEmailPlusProjectKey !== undefined
+        || message.payload.outlookEmailPlusCallerIdPrefix !== undefined
+        || message.payload.outlookEmailPlusAliasMaxPerMailbox !== undefined
+      ) {
+        updateMailProviderUI();
       }
       if (message.payload.plusModeEnabled !== undefined && inputPlusModeEnabled) {
         inputPlusModeEnabled.checked = Boolean(message.payload.plusModeEnabled);
