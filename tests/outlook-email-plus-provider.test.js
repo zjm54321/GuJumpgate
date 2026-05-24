@@ -164,6 +164,7 @@ test('claim reuse survives provider recreation with persisted alias usage and st
   assert.equal(completeRequest.body.account_id, 'acct-1');
   assert.equal(completeRequest.body.email, 'first@example.com');
   assert.equal(completeRequest.body.claim_token, 'token-1');
+  assert.equal(completeRequest.body.result, 'success');
   assert.equal(harness.requests.filter((request) => new URL(request.url).pathname === '/api/external/pool/claim-random').length, 2);
 });
 
@@ -228,6 +229,7 @@ test('claim reuse advances aliases up to the configured mailbox limit before cla
   assert.equal(completeRequest.body.account_id, 'acct-1');
   assert.equal(completeRequest.body.email, 'first@example.com');
   assert.equal(completeRequest.body.claim_token, 'token-1');
+  assert.equal(completeRequest.body.result, 'success');
   assert.equal(harness.requests.filter((request) => new URL(request.url).pathname === '/api/external/pool/claim-random').length, 2);
   assert.equal(harness.state.currentOutlookEmailPlusClaim.address, 'second@example.com');
   assert.equal(harness.state.currentOutlookEmailPlusClaim.registrationEmail, 'second+PayPal1@example.com');
@@ -258,7 +260,7 @@ test('claim reuse follows the current mailbox alias limit instead of a stale sto
   assert.equal(harness.requests.filter((request) => new URL(request.url).pathname === '/api/external/pool/claim-random').length, 1);
 });
 
-test('alias max defaults to 5 and clamps configured values to 50', async () => {
+test('alias max defaults to 5 and clamps configured values to 1 through 5', async () => {
   const defaultHarness = createProviderHarness((request) => {
     const url = new URL(request.url);
     if (url.pathname === '/api/external/pool/claim-random') {
@@ -279,7 +281,29 @@ test('alias max defaults to 5 and clamps configured values to 50', async () => {
   }, { outlookEmailPlusAliasMaxPerMailbox: 99 });
 
   await clampedHarness.provider.claimOutlookEmailPlusAddress(clampedHarness.state, { taskId: 'clamped-max' });
-  assert.equal(clampedHarness.state.currentOutlookEmailPlusClaim.aliasMax, 50);
+  assert.equal(clampedHarness.state.currentOutlookEmailPlusClaim.aliasMax, 5);
+
+  const minimumHarness = createProviderHarness((request) => {
+    const url = new URL(request.url);
+    if (url.pathname === '/api/external/pool/claim-random') {
+      return createJsonResponse(claimPayload('acct-minimum', 'minimum@example.com', 'token-minimum'));
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`);
+  }, { outlookEmailPlusAliasMaxPerMailbox: 0 });
+
+  await minimumHarness.provider.claimOutlookEmailPlusAddress(minimumHarness.state, { taskId: 'minimum-max' });
+  assert.equal(minimumHarness.state.currentOutlookEmailPlusClaim.aliasMax, 1);
+
+  const singleAliasHarness = createProviderHarness((request) => {
+    const url = new URL(request.url);
+    if (url.pathname === '/api/external/pool/claim-random') {
+      return createJsonResponse(claimPayload('acct-single', 'single@example.com', 'token-single'));
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`);
+  }, { outlookEmailPlusAliasMaxPerMailbox: 1 });
+
+  await singleAliasHarness.provider.claimOutlookEmailPlusAddress(singleAliasHarness.state, { taskId: 'single-max' });
+  assert.equal(singleAliasHarness.state.currentOutlookEmailPlusClaim.aliasMax, 1);
 });
 
 test('release uses remembered claim token and original claimed address', async () => {
@@ -338,6 +362,50 @@ test('verification polling avoids over-restrictive sender and subject filters', 
   assert.equal(result.ok, true);
   assert.equal(result.code, '123456');
   assert.equal(result.mailId, 'msg-1');
+});
+
+test('verification polling completes the claim with timeout when no code is found', async () => {
+  const harness = createProviderHarness((request) => {
+    const url = new URL(request.url);
+    if (url.pathname === '/api/external/verification-code') {
+      assert.equal(url.searchParams.get('email'), 'timeout+paypal1@example.com');
+      return createJsonResponse({ success: true, data: {} });
+    }
+    if (url.pathname === '/api/external/pool/claim-complete') {
+      return createJsonResponse({ success: true, data: { ok: true } });
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`);
+  });
+  harness.state.registrationEmailState = { current: 'timeout+PayPal1@example.com' };
+  harness.state.currentOutlookEmailPlusClaim = {
+    accountId: 'acct-timeout',
+    address: 'timeout@example.com',
+    baseAddress: 'timeout@example.com',
+    registrationEmail: 'timeout+PayPal1@example.com',
+    claimToken: 'token-timeout',
+    callerId: 'gujumpgate-timeout',
+    taskId: 'task-timeout',
+    projectKey: 'openai',
+    provider: 'outlook',
+  };
+
+  await assert.rejects(
+    harness.provider.pollOutlookEmailPlusVerificationCode(9, harness.state, {
+      maxAttempts: 2,
+      intervalMs: 0,
+    }),
+    /未在 Outlook Email Plus 中找到新的匹配验证码/
+  );
+
+  const completeRequest = harness.requests.find((request) => new URL(request.url).pathname === '/api/external/pool/claim-complete');
+  assert.equal(completeRequest.body.account_id, 'acct-timeout');
+  assert.equal(completeRequest.body.email, 'timeout@example.com');
+  assert.equal(completeRequest.body.claim_token, 'token-timeout');
+  assert.equal(completeRequest.body.caller_id, 'gujumpgate-timeout');
+  assert.equal(completeRequest.body.task_id, 'task-timeout');
+  assert.equal(completeRequest.body.project_key, 'openai');
+  assert.equal(completeRequest.body.result, 'verification_timeout');
+  assert.equal(harness.state.currentOutlookEmailPlusClaim, null);
 });
 
 test('verification polling prefers current registration alias over claimed base address', async () => {

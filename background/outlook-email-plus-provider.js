@@ -452,21 +452,18 @@
 
     function normalizeAliasMax(value, fallback = DEFAULT_ALIAS_MAX_PER_MAILBOX) {
       const numeric = Math.floor(Number(value));
-      if (Number.isFinite(numeric) && numeric >= 1) {
-        return Math.min(50, numeric);
+      if (Number.isFinite(numeric)) {
+        return Math.min(DEFAULT_ALIAS_MAX_PER_MAILBOX, Math.max(1, numeric));
       }
       const fallbackNumber = Math.floor(Number(fallback));
-      if (Number.isFinite(fallbackNumber) && fallbackNumber >= 1) {
-        return Math.min(50, fallbackNumber);
+      if (Number.isFinite(fallbackNumber)) {
+        return Math.min(DEFAULT_ALIAS_MAX_PER_MAILBOX, Math.max(1, fallbackNumber));
       }
       return DEFAULT_ALIAS_MAX_PER_MAILBOX;
     }
 
-    function getAliasMaxForState(state = {}, fallback = DEFAULT_ALIAS_MAX_PER_MAILBOX) {
-      return normalizeAliasMax(
-        state.outlookEmailPlusAliasMaxPerMailbox ?? state.outlookAliasMaxPerAccount,
-        fallback
-      );
+    function getAliasMaxForState(state = {}) {
+      return normalizeAliasMax(state.outlookEmailPlusAliasMaxPerMailbox, DEFAULT_ALIAS_MAX_PER_MAILBOX);
     }
 
     function buildPayPalAlias(baseAddress = '', index = 1) {
@@ -823,6 +820,7 @@
       }
 
       if (sawNoCode) {
+        await completeOutlookEmailPlusClaim(latestState, { result: 'verification_timeout' });
         throw new Error(`步骤 ${step}：未在 Outlook Email Plus 中找到新的匹配验证码。`);
       }
       throw lastError || new Error(`步骤 ${step}：Outlook Email Plus 轮询失败。`);
