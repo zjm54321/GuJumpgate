@@ -3140,6 +3140,18 @@ function normalizeOutlookAliasMaxPerAccount(value) {
   return Math.min(50, Math.max(1, Math.floor(numeric)));
 }
 
+function normalizeOutlookEmailPlusAliasMaxPerMailbox(value) {
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return 5;
+  }
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return 5;
+  }
+  return Math.min(5, Math.max(1, Math.floor(numeric)));
+}
+
 function normalizeHotmailAliasEnabledValue(value) {
   return Boolean(value);
 }
@@ -3669,7 +3681,7 @@ function applyOutlookEmailPlusSettingsState(state = {}) {
   }
   if (inputOutlookEmailPlusAliasMaxPerMailbox) {
     inputOutlookEmailPlusAliasMaxPerMailbox.value = String(
-      normalizeOutlookAliasMaxPerAccount(state?.outlookEmailPlusAliasMaxPerMailbox)
+      normalizeOutlookEmailPlusAliasMaxPerMailbox(state?.outlookEmailPlusAliasMaxPerMailbox)
     );
   }
 }
@@ -4518,7 +4530,7 @@ function collectSettingsPayload() {
     outlookEmailPlusProvider: normalizeOutlookEmailPlusProviderInput((typeof inputOutlookEmailPlusProvider !== 'undefined' && inputOutlookEmailPlusProvider) ? inputOutlookEmailPlusProvider.value : ''),
     outlookEmailPlusProjectKey: normalizeOutlookEmailPlusProjectKeyInput((typeof inputOutlookEmailPlusProjectKey !== 'undefined' && inputOutlookEmailPlusProjectKey) ? inputOutlookEmailPlusProjectKey.value : ''),
     outlookEmailPlusCallerIdPrefix: normalizeOutlookEmailPlusCallerIdPrefixInput((typeof inputOutlookEmailPlusCallerIdPrefix !== 'undefined' && inputOutlookEmailPlusCallerIdPrefix) ? inputOutlookEmailPlusCallerIdPrefix.value : ''),
-    outlookEmailPlusAliasMaxPerMailbox: normalizeOutlookAliasMaxPerAccount((typeof inputOutlookEmailPlusAliasMaxPerMailbox !== 'undefined' && inputOutlookEmailPlusAliasMaxPerMailbox) ? inputOutlookEmailPlusAliasMaxPerMailbox.value : 5),
+    outlookEmailPlusAliasMaxPerMailbox: normalizeOutlookEmailPlusAliasMaxPerMailbox((typeof inputOutlookEmailPlusAliasMaxPerMailbox !== 'undefined' && inputOutlookEmailPlusAliasMaxPerMailbox) ? inputOutlookEmailPlusAliasMaxPerMailbox.value : 5),
     autoRunSkipFailures: inputAutoSkipFailures.checked,
     autoRunRetryNonFreeTrial: Boolean(inputAutoRunRetryNonFreeTrial?.checked),
     autoRunRetryPaypalCallback: Boolean(inputAutoRunRetryPaypalCallback?.checked),
@@ -16842,7 +16854,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         inputOutlookEmailPlusCallerIdPrefix.value = normalizeOutlookEmailPlusCallerIdPrefixValue(message.payload.outlookEmailPlusCallerIdPrefix);
       }
       if (message.payload.outlookEmailPlusAliasMaxPerMailbox !== undefined && inputOutlookEmailPlusAliasMaxPerMailbox) {
-        inputOutlookEmailPlusAliasMaxPerMailbox.value = String(normalizeOutlookAliasMaxPerAccount(message.payload.outlookEmailPlusAliasMaxPerMailbox));
+        inputOutlookEmailPlusAliasMaxPerMailbox.value = String(normalizeOutlookEmailPlusAliasMaxPerMailbox(message.payload.outlookEmailPlusAliasMaxPerMailbox));
       }
       if (
         message.payload.outlookEmailPlusBaseUrl !== undefined
