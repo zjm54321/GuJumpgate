@@ -586,6 +586,7 @@ const HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_MIN_SECONDS = 0;
 const HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_MAX_SECONDS = 60;
 const OUTLOOK_ALIAS_DEFAULT_MAX_PER_ACCOUNT = 5;
 const OUTLOOK_ALIAS_MAX_PER_ACCOUNT_LIMIT = 50;
+const OUTLOOK_EMAIL_PLUS_ALIAS_MAX_PER_MAILBOX_LIMIT = 5;
 const OUTLOOK_SUBSCRIPTION_USED_KEYWORD = 'ChatGPT Plus Subscription';
 const VERIFICATION_RESEND_COUNT_MIN = 0;
 const VERIFICATION_RESEND_COUNT_MAX = 20;
@@ -1471,6 +1472,22 @@ function normalizeOutlookAliasMaxPerAccount(value, fallback = OUTLOOK_ALIAS_DEFA
     return normalizedFallback;
   }
   return Math.min(OUTLOOK_ALIAS_MAX_PER_ACCOUNT_LIMIT, Math.max(1, Math.floor(numeric)));
+}
+
+function normalizeOutlookEmailPlusAliasMaxPerMailbox(value, fallback = OUTLOOK_ALIAS_DEFAULT_MAX_PER_ACCOUNT) {
+  const rawValue = String(value ?? '').trim();
+  const fallbackNumber = Number(fallback);
+  const normalizedFallback = Number.isFinite(fallbackNumber)
+    ? Math.min(OUTLOOK_EMAIL_PLUS_ALIAS_MAX_PER_MAILBOX_LIMIT, Math.max(1, Math.floor(fallbackNumber)))
+    : OUTLOOK_ALIAS_DEFAULT_MAX_PER_ACCOUNT;
+  if (!rawValue) {
+    return normalizedFallback;
+  }
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return normalizedFallback;
+  }
+  return Math.min(OUTLOOK_EMAIL_PLUS_ALIAS_MAX_PER_MAILBOX_LIMIT, Math.max(1, Math.floor(numeric)));
 }
 
 function normalizeVerificationResendCount(value, fallback) {
@@ -3420,7 +3437,7 @@ function normalizePersistentSettingValue(key, value) {
     case 'outlookEmailPlusCallerIdPrefix':
       return normalizeOutlookEmailPlusCallerIdPrefix(value) || PERSISTED_SETTING_DEFAULTS.outlookEmailPlusCallerIdPrefix;
     case 'outlookEmailPlusAliasMaxPerMailbox':
-      return normalizeOutlookAliasMaxPerAccount(
+      return normalizeOutlookEmailPlusAliasMaxPerMailbox(
         value,
         PERSISTED_SETTING_DEFAULTS.outlookEmailPlusAliasMaxPerMailbox
       );
