@@ -21,10 +21,13 @@
       normalizeOutlookEmailPlusVerificationCode,
       OUTLOOK_EMAIL_PLUS_GENERATOR = 'outlook-email-plus',
       OUTLOOK_EMAIL_PLUS_PROVIDER = 'outlook-email-plus',
+      broadcastDataUpdate = null,
       fetchImpl = typeof fetch === 'function' ? fetch.bind(globalThis) : null,
       getState = async () => ({}),
+      normalizeHotmailAliasUsage: normalizeHotmailAliasUsageDep = null,
       persistRegistrationEmailState = null,
       setEmailState = async () => {},
+      setPersistentSettings = null,
       setState = async () => {},
       sleepWithStop = async () => {},
       throwIfStopped = () => {},
@@ -149,6 +152,57 @@
         .replace(/^[-._]+|[-._]+$/g, '');
     }
 
+    function normalizeUsageKey(value = '') {
+      return String(value || '').trim().toLowerCase();
+    }
+
+    function normalizeAliasUsageEntry(value = {}) {
+      const email = String(value.email || '').trim();
+      if (!email) return null;
+      return {
+        email,
+        used: Boolean(value.used),
+        lastCheckedAt: Math.max(0, Math.floor(Number(value.lastCheckedAt) || 0)),
+        reason: String(value.reason || '').trim(),
+      };
+    }
+
+    function normalizeOutlookEmailPlusAliasUsage(value = {}) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return {};
+      }
+      const usage = {};
+      for (const [rawKey, rawBucket] of Object.entries(value)) {
+        const usageKey = normalizeUsageKey(rawKey);
+        if (!usageKey || !rawBucket || typeof rawBucket !== 'object' || Array.isArray(rawBucket)) {
+          continue;
+        }
+        const rawAliases = rawBucket.aliases && typeof rawBucket.aliases === 'object' && !Array.isArray(rawBucket.aliases)
+          ? rawBucket.aliases
+          : {};
+        const aliases = {};
+        for (const [rawEmail, rawEntry] of Object.entries(rawAliases)) {
+          const entry = normalizeAliasUsageEntry({
+            ...(rawEntry && typeof rawEntry === 'object' && !Array.isArray(rawEntry) ? rawEntry : {}),
+            email: rawEntry?.email || rawEmail,
+          });
+          if (entry) aliases[normalizeOutlookEmailPlusAddress(entry.email)] = entry;
+        }
+        usage[usageKey] = {
+          aliases,
+          updatedAt: Math.max(0, Math.floor(Number(rawBucket.updatedAt) || 0)),
+        };
+      }
+      return usage;
+    }
+
+    function normalizeAliasUsage(value = {}) {
+      if (typeof normalizeHotmailAliasUsageDep === 'function') {
+        return normalizeHotmailAliasUsageDep(value);
+      }
+      return normalizeOutlookEmailPlusAliasUsage(value);
+    }
+
     function resolveClaimTaskId(state = {}, options = {}) {
       return normalizeIdentifierPart(
         options.taskId
@@ -201,6 +255,138 @@
       return null;
     }
 
+    function buildOutlookEmailPlusAliasUsageKey(claim = {}) {
+      const explicitKey = normalizeUsageKey(claim.usageKey);
+      if (explicitKey) return explicitKey;
+      const accountId = normalizeIdentifierPart(claim.accountId);
+      if (accountId) return `outlook-email-plus:${accountId}`;
+      const baseAddress = normalizeOutlookEmailPlusAddress(claim.baseAddress)
+        || deriveOutlookEmailPlusBaseAddress(claim.address)
+        || normalizeOutlookEmailPlusAddress(claim.address);
+      return baseAddress ? `outlook-email-plus:${baseAddress}` : '';
+    }
+
+    function getAliasEntriesForClaimFromUsage(usage = {}, claim = {}) {
+      const usageKey = buildOutlookEmailPlusAliasUsageKey(claim);
+      if (!usageKey) return [];
+      return Object.values(usage[usageKey]?.aliases || {});
+    }
+
+    function getAliasEntryIndex(entry = {}, baseAddress = '') {
+      return getPayPalAliasIndex(entry.email, baseAddress) || Number.MAX_SAFE_INTEGER;
+    }
+
+    function sortAliasEntriesByIndex(entries = [], baseAddress = '') {
+      return [...entries].sort((left, right) => {
+        const leftIndex = getAliasEntryIndex(left, baseAddress);
+        const rightIndex = getAliasEntryIndex(right, baseAddress);
+        if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+        return String(left.email || '').localeCompare(String(right.email || ''));
+      });
+    }
+
+    function countUsedAliasEntries(entries = []) {
+      return entries.reduce((count, entry) => count + (entry?.used ? 1 : 0), 0);
+    }
+
+    async function persistOutlookEmailPlusAliasUsage(nextUsage = {}) {
+      if (typeof setPersistentSettings === 'function') {
+        await setPersistentSettings({ hotmailAliasUsage: nextUsage });
+      }
+      if (typeof setState === 'function') {
+        await setState({ hotmailAliasUsage: nextUsage });
+      }
+      if (typeof broadcastDataUpdate === 'function') {
+        broadcastDataUpdate({ hotmailAliasUsage: nextUsage });
+      }
+    }
+
+    async function setOutlookEmailPlusAliasUsageEntry(state = {}, claim = {}, aliasEmail = '', updates = {}) {
+      const usageKey = buildOutlookEmailPlusAliasUsageKey(claim);
+      const emailKey = normalizeOutlookEmailPlusAddress(aliasEmail);
+      if (!usageKey || !emailKey) {
+        return { entry: null, usage: normalizeAliasUsage(state.hotmailAliasUsage) };
+      }
+      const usage = normalizeAliasUsage(state.hotmailAliasUsage);
+      const bucket = usage[usageKey] || { aliases: {}, updatedAt: 0 };
+      const aliases = { ...(bucket.aliases || {}) };
+      const previous = aliases[emailKey] || {};
+      const now = Date.now();
+      const entry = {
+        email: String(aliasEmail || previous.email || emailKey).trim(),
+        used: updates.used === undefined ? Boolean(previous.used) : Boolean(updates.used),
+        lastCheckedAt: Math.max(0, Math.floor(Number(updates.lastCheckedAt) || now)),
+        reason: String(updates.reason || previous.reason || '').trim(),
+      };
+      aliases[emailKey] = entry;
+      const nextUsage = {
+        ...usage,
+        [usageKey]: {
+          ...bucket,
+          aliases,
+          updatedAt: now,
+        },
+      };
+      await persistOutlookEmailPlusAliasUsage(nextUsage);
+      return { entry, usage: nextUsage };
+    }
+
+    async function ensureOutlookEmailPlusClaimAliasUsage(state = {}, storedClaim = {}) {
+      const usageKey = buildOutlookEmailPlusAliasUsageKey(storedClaim);
+      const baseAddress = normalizeOutlookEmailPlusAddress(storedClaim.baseAddress)
+        || deriveOutlookEmailPlusBaseAddress(storedClaim.address)
+        || normalizeOutlookEmailPlusAddress(storedClaim.address);
+      const aliasMax = getAliasMaxForState(state, storedClaim.aliasMax);
+      const aliasIndex = Math.min(aliasMax, Math.max(
+        getPayPalAliasIndex(storedClaim.registrationEmail, baseAddress) || 0,
+        Math.floor(Number(storedClaim.aliasIndex) || 0)
+      ));
+      if (!usageKey || !baseAddress || aliasIndex <= 0) {
+        return normalizeAliasUsage(state.hotmailAliasUsage);
+      }
+
+      const usage = normalizeAliasUsage(state.hotmailAliasUsage);
+      const bucket = usage[usageKey] || { aliases: {}, updatedAt: 0 };
+      const aliases = { ...(bucket.aliases || {}) };
+      let changed = false;
+      const now = Date.now();
+      for (let index = 1; index <= aliasIndex; index += 1) {
+        const aliasEmail = allocateRegistrationAlias(baseAddress, index);
+        const email = normalizeOutlookEmailPlusAddress(aliasEmail);
+        const shouldBeUsed = index < aliasIndex || Boolean(storedClaim.aliasUsed);
+        const existing = aliases[email];
+        if (!existing) {
+          aliases[email] = {
+            email: aliasEmail,
+            used: shouldBeUsed,
+            lastCheckedAt: now,
+            reason: shouldBeUsed ? 'legacy_used' : 'allocated',
+          };
+          changed = true;
+        } else if (shouldBeUsed && !existing.used) {
+          aliases[email] = {
+            ...existing,
+            used: true,
+            lastCheckedAt: now,
+            reason: existing.reason || 'legacy_used',
+          };
+          changed = true;
+        }
+      }
+      if (!changed) return usage;
+
+      const nextUsage = {
+        ...usage,
+        [usageKey]: {
+          ...bucket,
+          aliases,
+          updatedAt: now,
+        },
+      };
+      await persistOutlookEmailPlusAliasUsage(nextUsage);
+      return nextUsage;
+    }
+
     function buildStoredOutlookEmailPlusClaim(claim = {}, context = {}) {
       return {
         accountId: claim.accountId || '',
@@ -218,6 +404,8 @@
         aliasIndex: Math.max(0, Math.floor(Number(claim.aliasIndex) || 0)),
         aliasMax: normalizeAliasMax(claim.aliasMax || context.aliasMax),
         aliasUsed: Boolean(claim.aliasUsed),
+        usageKey: buildOutlookEmailPlusAliasUsageKey({ ...claim, usageKey: claim.usageKey || context.usageKey }),
+        claimToken: claim.claimToken || context.claimToken || '',
       };
     }
 
@@ -256,8 +444,9 @@
       }
       const rememberedClaim = getRememberedClaim(storedClaim) || {};
       return {
-        ...storedClaim,
         ...rememberedClaim,
+        ...storedClaim,
+        claimToken: storedClaim.claimToken || rememberedClaim.claimToken || '',
       };
     }
 
@@ -329,9 +518,6 @@
         return null;
       }
       const rememberedClaim = getRememberedClaim(storedClaim);
-      if (!rememberedClaim?.claimToken) {
-        return null;
-      }
       const address = normalizeOutlookEmailPlusAddress(storedClaim.address);
       const baseAddress = normalizeOutlookEmailPlusAddress(storedClaim.baseAddress)
         || deriveOutlookEmailPlusBaseAddress(address)
@@ -344,34 +530,63 @@
         address,
         baseAddress,
         aliasIndex: Math.max(0, Math.floor(Number(storedClaim.aliasIndex) || 0)),
-        aliasMax: normalizeAliasMax(storedClaim.aliasMax, getAliasMaxForState(state)),
+        aliasMax: getAliasMaxForState(state, storedClaim.aliasMax),
         aliasUsed: Boolean(storedClaim.aliasUsed),
+        usageKey: buildOutlookEmailPlusAliasUsageKey({ ...storedClaim, address, baseAddress }),
+        claimToken: storedClaim.claimToken || rememberedClaim?.claimToken || '',
       };
     }
 
     function buildReusableRegistrationClaim(storedClaim = {}, context = {}) {
-      const aliasMax = normalizeAliasMax(storedClaim.aliasMax, getAliasMaxForState(context.state || {}, storedClaim.aliasMax));
-      if (!storedClaim.aliasUsed && storedClaim.registrationEmail) {
+      const state = context.state || {};
+      const aliasMax = getAliasMaxForState(state, storedClaim.aliasMax);
+      const usage = normalizeAliasUsage(context.hotmailAliasUsage || state.hotmailAliasUsage);
+      const usageKey = buildOutlookEmailPlusAliasUsageKey(storedClaim);
+      const entries = getAliasEntriesForClaimFromUsage(usage, { ...storedClaim, usageKey });
+      if (countUsedAliasEntries(entries) >= aliasMax) {
         return {
           ...storedClaim,
-          aliasMax,
-        };
-      }
-      const nextAliasIndex = Math.max(0, Math.floor(Number(storedClaim.aliasIndex) || 0)) + 1;
-      if (nextAliasIndex > aliasMax) {
-        return {
-          ...storedClaim,
+          usageKey,
           aliasMax,
           exhausted: true,
         };
       }
-      const registrationEmail = allocateRegistrationAlias(storedClaim.baseAddress, nextAliasIndex);
+
+      const unusedEntry = sortAliasEntriesByIndex(entries, storedClaim.baseAddress)
+        .find((entry) => !entry.used);
+      if (unusedEntry) {
+        const aliasIndex = getPayPalAliasIndex(unusedEntry.email, storedClaim.baseAddress)
+          || Math.max(1, Math.floor(Number(storedClaim.aliasIndex) || 1));
+        return {
+          ...storedClaim,
+          registrationEmail: unusedEntry.email,
+          aliasIndex,
+          aliasMax,
+          aliasUsed: false,
+          usageKey,
+        };
+      }
+
+      const knownAliases = new Set(entries.map((entry) => normalizeOutlookEmailPlusAddress(entry.email)));
+      for (let index = 1; index <= aliasMax; index += 1) {
+        const registrationEmail = allocateRegistrationAlias(storedClaim.baseAddress, index);
+        if (!knownAliases.has(normalizeOutlookEmailPlusAddress(registrationEmail))) {
+          return {
+            ...storedClaim,
+            aliasIndex: index,
+            aliasMax,
+            aliasUsed: false,
+            registrationEmail,
+            usageKey,
+          };
+        }
+      }
+
       return {
         ...storedClaim,
-        aliasIndex: nextAliasIndex,
         aliasMax,
-        aliasUsed: false,
-        registrationEmail,
+        usageKey,
+        exhausted: true,
       };
     }
 
@@ -380,8 +595,10 @@
       if (!storedClaim) {
         return { reused: false };
       }
+      const hotmailAliasUsage = await ensureOutlookEmailPlusClaimAliasUsage(state, storedClaim);
       const claim = buildReusableRegistrationClaim(storedClaim, {
         state,
+        hotmailAliasUsage,
       });
       if (claim.exhausted) {
         return { reused: false, exhausted: true, claim };
@@ -395,10 +612,17 @@
         taskId: storedClaim.taskId,
         projectKey: storedClaim.projectKey || config.projectKey,
         provider: storedClaim.provider || config.provider,
+        usageKey: storedClaim.usageKey,
       });
       if (typeof setState === 'function') {
         await setState({ currentOutlookEmailPlusClaim: nextStoredClaim });
       }
+      await setOutlookEmailPlusAliasUsageEntry(
+        { ...state, hotmailAliasUsage },
+        nextStoredClaim,
+        claim.registrationEmail,
+        { used: false, reason: 'allocated' }
+      );
       await addLog(`Outlook Email Plus：复用 ${claim.address}，本次注册使用 ${claim.registrationEmail}`, 'ok');
       return { reused: true, address: claim.registrationEmail };
     }
@@ -455,39 +679,59 @@
       if (typeof setState === 'function') {
         await setState({ currentOutlookEmailPlusClaim: storedClaim });
       }
+      await setOutlookEmailPlusAliasUsageEntry(latestState, storedClaim, claim.registrationEmail, {
+        used: false,
+        reason: 'allocated',
+      });
       await addLog(`Outlook Email Plus：已认领 ${claim.address}，注册使用 ${claim.registrationEmail}`, 'ok');
       return claim.registrationEmail;
     }
 
     async function markOutlookEmailPlusAliasUsed(state = {}) {
       const latestState = state || await getState();
-      const storedClaim = latestState.currentOutlookEmailPlusClaim;
+      const storedClaim = getReusableStoredClaim(latestState) || latestState.currentOutlookEmailPlusClaim;
       if (!storedClaim || typeof storedClaim !== 'object') {
         return { handled: false, reason: 'missing_claim' };
       }
-      const aliasMax = normalizeAliasMax(storedClaim.aliasMax, getAliasMaxForState(latestState));
+      const aliasMax = getAliasMaxForState(latestState, storedClaim.aliasMax);
       const aliasIndex = Math.max(
         getPayPalAliasIndex(storedClaim.registrationEmail, storedClaim.baseAddress) || 0,
         Math.floor(Number(storedClaim.aliasIndex) || 0)
       );
       const normalizedAliasIndex = Math.max(1, aliasIndex || 1);
-      const alreadyUsed = Boolean(storedClaim.aliasUsed);
+      const hotmailAliasUsage = await ensureOutlookEmailPlusClaimAliasUsage(latestState, storedClaim);
+      const usageKey = buildOutlookEmailPlusAliasUsageKey(storedClaim);
+      const usageBefore = normalizeAliasUsage(hotmailAliasUsage);
+      const registrationEmail = String(storedClaim.registrationEmail || storedClaim.address || '').trim();
+      const registrationEmailKey = normalizeOutlookEmailPlusAddress(registrationEmail);
+      const existingEntry = usageBefore[usageKey]?.aliases?.[registrationEmailKey] || null;
+      const alreadyUsed = Boolean(existingEntry?.used || storedClaim.aliasUsed);
+      const usageResult = await setOutlookEmailPlusAliasUsageEntry(
+        { ...latestState, hotmailAliasUsage },
+        { ...storedClaim, usageKey },
+        registrationEmail,
+        { used: true, reason: 'flow_completed' }
+      );
+      const usedAliasCount = countUsedAliasEntries(
+        getAliasEntriesForClaimFromUsage(usageResult.usage, { ...storedClaim, usageKey })
+      );
       const nextStoredClaim = {
         ...storedClaim,
         aliasIndex: normalizedAliasIndex,
         aliasMax,
         aliasUsed: true,
+        usageKey,
       };
-      if (!alreadyUsed && typeof setState === 'function') {
+      if (typeof setState === 'function') {
         await setState({ currentOutlookEmailPlusClaim: nextStoredClaim });
       }
       return {
         handled: true,
         alreadyUsed,
-        exhausted: normalizedAliasIndex >= aliasMax,
+        exhausted: usedAliasCount >= aliasMax,
         aliasIndex: normalizedAliasIndex,
         aliasMax,
-        registrationEmail: storedClaim.registrationEmail || storedClaim.address || '',
+        registrationEmail,
       };
     }
 

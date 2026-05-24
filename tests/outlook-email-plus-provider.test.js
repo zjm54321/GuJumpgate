@@ -26,7 +26,7 @@ function createProviderHarness(routeHandler, initialState = {}) {
     outlookEmailPlusCallerIdPrefix: 'gujumpgate',
     ...initialState,
   };
-  const provider = createOutlookEmailPlusProvider({
+  const buildProvider = () => createOutlookEmailPlusProvider({
     ...outlookEmailPlusUtils,
     addLog: async (message, level) => logs.push({ message, level }),
     fetchImpl: async (url, options = {}) => {
@@ -47,13 +47,15 @@ function createProviderHarness(routeHandler, initialState = {}) {
         current: email,
       };
     },
+    setPersistentSettings: async (patch) => Object.assign(state, patch),
     setState: async (patch) => Object.assign(state, patch),
     sleepWithStop: async () => {},
     throwIfStopped: () => {},
     OUTLOOK_EMAIL_PLUS_GENERATOR: 'outlook-email-plus',
     OUTLOOK_EMAIL_PLUS_PROVIDER: 'outlook-email-plus',
   });
-  return { logs, persistedEmails, provider, requests, state };
+  const provider = buildProvider();
+  return { logs, persistedEmails, provider, recreateProvider: buildProvider, requests, state };
 }
 
 function claimPayload(accountId, email, claimToken) {
@@ -70,7 +72,7 @@ function claimPayload(accountId, email, claimToken) {
   };
 }
 
-test('base claims generate PayPal aliases and store only sanitized claim state', async () => {
+test('base claims generate PayPal aliases and store session claim state without raw payloads', async () => {
   const harness = createProviderHarness((request) => {
     const url = new URL(request.url);
     if (url.pathname === '/api/external/pool/claim-random') {
@@ -92,7 +94,7 @@ test('base claims generate PayPal aliases and store only sanitized claim state',
   assert.match(claimRequest.body.caller_id, /^gujumpgate-/);
   assert.equal(claimRequest.body.task_id, 'task-42');
   assert.equal(claimRequest.options.headers['X-API-Key'], 'secret-key');
-  assert.equal(harness.state.currentOutlookEmailPlusClaim.claimToken, undefined);
+  assert.equal(harness.state.currentOutlookEmailPlusClaim.claimToken, 'claim-token-1');
   assert.equal(harness.state.currentOutlookEmailPlusClaim.raw, undefined);
   assert.equal(harness.state.currentOutlookEmailPlusClaim.taskId, claimRequest.body.task_id);
   assert.equal(harness.state.currentOutlookEmailPlusClaim.address, 'user@example.com');
@@ -102,6 +104,11 @@ test('base claims generate PayPal aliases and store only sanitized claim state',
   assert.equal(harness.state.currentOutlookEmailPlusClaim.aliasIndex, 1);
   assert.equal(harness.state.currentOutlookEmailPlusClaim.aliasMax, 3);
   assert.equal(harness.state.currentOutlookEmailPlusClaim.aliasUsed, false);
+  assert.ok(harness.state.currentOutlookEmailPlusClaim.usageKey.startsWith('outlook-email-plus:'));
+  assert.equal(
+    harness.state.hotmailAliasUsage[harness.state.currentOutlookEmailPlusClaim.usageKey].aliases['user+paypal1@example.com'].used,
+    false
+  );
 
   const result = await harness.provider.completeOutlookEmailPlusClaim(harness.state);
 
@@ -115,6 +122,49 @@ test('base claims generate PayPal aliases and store only sanitized claim state',
   assert.equal(completeRequest.body.task_id, claimRequest.body.task_id);
   assert.equal(completeRequest.body.result, 'success');
   assert.equal(harness.state.currentOutlookEmailPlusClaim, null);
+});
+
+test('claim reuse survives provider recreation with persisted alias usage and stored claim token', async () => {
+  const claims = [
+    claimPayload('acct-1', 'first@example.com', 'token-1'),
+    claimPayload('acct-2', 'second@example.com', 'token-2'),
+  ];
+  const harness = createProviderHarness((request) => {
+    const url = new URL(request.url);
+    if (url.pathname === '/api/external/pool/claim-random') {
+      return createJsonResponse(claims.shift());
+    }
+    if (url.pathname === '/api/external/pool/claim-complete') {
+      return createJsonResponse({ success: true, data: { ok: true } });
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`);
+  }, { outlookEmailPlusAliasMaxPerMailbox: 2 });
+
+  const first = await harness.provider.claimOutlookEmailPlusAddress(harness.state, { taskId: 'batch' });
+  const restartedProvider = harness.recreateProvider();
+  const repeated = await restartedProvider.claimOutlookEmailPlusAddress(harness.state, { taskId: 'batch' });
+  assert.equal(first, 'first+PayPal1@example.com');
+  assert.equal(repeated, 'first+PayPal1@example.com');
+  assert.equal(harness.requests.filter((request) => new URL(request.url).pathname === '/api/external/pool/claim-random').length, 1);
+
+  const usedFirst = await restartedProvider.markOutlookEmailPlusAliasUsed(harness.state);
+  assert.equal(usedFirst.exhausted, false);
+  assert.equal(usedFirst.aliasIndex, 1);
+  const second = await restartedProvider.claimOutlookEmailPlusAddress(harness.state, { taskId: 'batch' });
+  assert.equal(second, 'first+PayPal2@example.com');
+  assert.equal(harness.requests.filter((request) => new URL(request.url).pathname === '/api/external/pool/claim-random').length, 1);
+
+  const usedSecond = await restartedProvider.markOutlookEmailPlusAliasUsed(harness.state);
+  assert.equal(usedSecond.exhausted, true);
+  assert.equal(usedSecond.aliasIndex, 2);
+  const third = await restartedProvider.claimOutlookEmailPlusAddress(harness.state, { taskId: 'batch-2' });
+
+  assert.equal(third, 'second+PayPal1@example.com');
+  const completeRequest = harness.requests.find((request) => new URL(request.url).pathname === '/api/external/pool/claim-complete');
+  assert.equal(completeRequest.body.account_id, 'acct-1');
+  assert.equal(completeRequest.body.email, 'first@example.com');
+  assert.equal(completeRequest.body.claim_token, 'token-1');
+  assert.equal(harness.requests.filter((request) => new URL(request.url).pathname === '/api/external/pool/claim-random').length, 2);
 });
 
 test('claimed aliases use the base mailbox for numbered registration aliases without nesting', async () => {
@@ -183,6 +233,29 @@ test('claim reuse advances aliases up to the configured mailbox limit before cla
   assert.equal(harness.state.currentOutlookEmailPlusClaim.registrationEmail, 'second+PayPal1@example.com');
   assert.equal(harness.state.currentOutlookEmailPlusClaim.aliasIndex, 1);
   assert.equal(harness.state.currentOutlookEmailPlusClaim.aliasUsed, false);
+});
+
+test('claim reuse follows the current mailbox alias limit instead of a stale stored claim limit', async () => {
+  const harness = createProviderHarness((request) => {
+    const url = new URL(request.url);
+    if (url.pathname === '/api/external/pool/claim-random') {
+      return createJsonResponse(claimPayload('acct-1', 'first@example.com', 'token-1'));
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`);
+  }, { outlookEmailPlusAliasMaxPerMailbox: 2 });
+
+  await harness.provider.claimOutlookEmailPlusAddress(harness.state, { taskId: 'expanded-limit' });
+  harness.state.outlookEmailPlusAliasMaxPerMailbox = 5;
+
+  await harness.provider.markOutlookEmailPlusAliasUsed(harness.state);
+  const second = await harness.provider.claimOutlookEmailPlusAddress(harness.state, { taskId: 'expanded-limit' });
+  const usedSecond = await harness.provider.markOutlookEmailPlusAliasUsed(harness.state);
+  const third = await harness.provider.claimOutlookEmailPlusAddress(harness.state, { taskId: 'expanded-limit' });
+
+  assert.equal(second, 'first+PayPal2@example.com');
+  assert.equal(usedSecond.exhausted, false);
+  assert.equal(third, 'first+PayPal3@example.com');
+  assert.equal(harness.requests.filter((request) => new URL(request.url).pathname === '/api/external/pool/claim-random').length, 1);
 });
 
 test('alias max defaults to 5 and clamps configured values to 50', async () => {
