@@ -9,6 +9,7 @@
   const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
   const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
   const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
+  const PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX2API_CODEX_SESSION = 'codex2api_codex_session';
   const VALID_PANEL_MODES = Object.freeze(['local-cpa-json', LOCAL_CPA_JSON_NO_RT_PANEL_MODE, 'cpa', 'sub2api', 'codex2api']);
 
   const DEFAULT_FLOW_CAPABILITIES = Object.freeze({
@@ -81,6 +82,10 @@
     codex2api: Object.freeze({
       supportsPhoneSignup: true,
       requiresPhoneSignupWarning: false,
+      supportedPlusAccountAccessStrategies: Object.freeze([
+        PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH,
+        PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX2API_CODEX_SESSION,
+      ]),
     }),
   });
 
@@ -116,6 +121,9 @@
     if (normalized === PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION) {
       return PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION;
     }
+    if (normalized === PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX2API_CODEX_SESSION) {
+      return PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX2API_CODEX_SESSION;
+    }
     return PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
   }
 
@@ -127,6 +135,9 @@
     if (normalizedPanelMode === 'cpa') {
       return PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION;
     }
+    if (normalizedPanelMode === 'codex2api') {
+      return PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX2API_CODEX_SESSION;
+    }
     return PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
   }
 
@@ -135,6 +146,7 @@
     if (
       normalized === PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION
       || normalized === PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION
+      || normalized === PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX2API_CODEX_SESSION
     ) {
       return getPlusAccountSessionStrategyForPanel(panelMode);
     }
@@ -528,6 +540,7 @@
     PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH,
     PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION,
     PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION,
+    PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX2API_CODEX_SESSION,
     SIGNUP_METHOD_EMAIL,
     SIGNUP_METHOD_PHONE,
     normalizeFlowId,
