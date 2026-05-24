@@ -1,10 +1,15 @@
 (function attachBackgroundCodex2ApiApi(root, factory) {
   root.MultiPageBackgroundCodex2ApiApi = factory();
 })(typeof self !== 'undefined' ? self : globalThis, function createBackgroundCodex2ApiApiModule() {
+  const moduleRoot = typeof self !== 'undefined' ? self : globalThis;
+
   function createCodex2ApiApi(deps = {}) {
     const {
       addLog = async () => {},
+      BlobImpl = typeof Blob === 'function' ? Blob : null,
+      buildSessionAuthJson = null,
       fetchImpl = typeof fetch === 'function' ? fetch.bind(globalThis) : null,
+      FormDataImpl = typeof FormData === 'function' ? FormData : null,
       normalizeCodex2ApiUrl = (value) => String(value || '').trim(),
     } = deps;
 
@@ -56,6 +61,38 @@
           name,
           access_token: accessToken,
         },
+      };
+    }
+
+    function getSessionAuthJsonBuilder() {
+      if (typeof buildSessionAuthJson === 'function') {
+        return buildSessionAuthJson;
+      }
+      const createCpaApi = moduleRoot?.MultiPageBackgroundCpaApi?.createCpaApi;
+      if (typeof createCpaApi !== 'function') {
+        throw new Error('CPA SESSION JSON 转换模块未加载，无法保留 Codex2API 套餐信息。');
+      }
+      const cpaApi = createCpaApi({ addLog });
+      if (typeof cpaApi?.buildCpaSessionAuthJson !== 'function') {
+        throw new Error('CPA SESSION JSON 转换模块不可用，无法保留 Codex2API 套餐信息。');
+      }
+      return cpaApi.buildCpaSessionAuthJson;
+    }
+
+    function buildCodex2ApiSessionImportArtifact(state = {}, options = {}) {
+      const sessionAuth = getSessionAuthJsonBuilder()(state, options);
+      const authJson = sessionAuth?.authJson;
+      if (!authJson || typeof authJson !== 'object' || Array.isArray(authJson)) {
+        throw new Error('未生成可导入 Codex2API 的 SESSION JSON。');
+      }
+      const fileName = normalizeString(sessionAuth.fileName) || `${resolveAccountName(state)}.json`;
+      return {
+        name: firstNonEmpty(sessionAuth.email, authJson.email, resolveAccountName(state)),
+        email: firstNonEmpty(sessionAuth.email, authJson.email),
+        fileName,
+        authJson,
+        jsonText: JSON.stringify(authJson, null, 2),
+        hasRefreshToken: Boolean(sessionAuth.hasRefreshToken),
       };
     }
 
@@ -138,6 +175,64 @@
       }
     }
 
+    async function fetchCodex2ApiMultipart(rawUrl, path, options = {}) {
+      if (typeof fetchImpl !== 'function') {
+        throw new Error('当前环境不支持 fetch，无法请求 Codex2API。');
+      }
+      if (typeof FormDataImpl !== 'function') {
+        throw new Error('当前环境不支持 FormData，无法上传 Codex2API 导入文件。');
+      }
+      if (typeof BlobImpl !== 'function') {
+        throw new Error('当前环境不支持 Blob，无法上传 Codex2API 导入文件。');
+      }
+      const adminKey = normalizeString(options.adminKey);
+      if (!adminKey) {
+        throw new Error('尚未配置 Codex2API 管理密钥，请先在侧边栏填写。');
+      }
+
+      const url = resolveCodex2ApiEndpoint(rawUrl, path);
+      const form = new FormDataImpl();
+      for (const [key, value] of Object.entries(options.fields || {})) {
+        form.append(key, normalizeString(value));
+      }
+      for (const file of options.files || []) {
+        const fieldName = normalizeString(file.fieldName) || 'file';
+        const fileName = normalizeString(file.fileName) || 'codex-session.json';
+        const content = file.content instanceof BlobImpl
+          ? file.content
+          : new BlobImpl([normalizeString(file.content)], { type: normalizeString(file.type) || 'application/json' });
+        form.append(fieldName, content, fileName);
+      }
+
+      const timeoutMs = Math.max(1000, Math.floor(Number(options.timeoutMs) || 30000));
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+      try {
+        const response = await fetchImpl(url, {
+          method: options.method || 'POST',
+          headers: {
+            Accept: 'application/json',
+            'X-Admin-Key': adminKey,
+          },
+          body: form,
+          signal: controller.signal,
+        });
+        const payload = await parseJsonResponse(response);
+        if (!response.ok) {
+          throw new Error(getCodex2ApiErrorMessage(payload, response.status));
+        }
+        return payload;
+      } catch (error) {
+        if (error?.name === 'AbortError') {
+          throw new Error(`Codex2API 请求超时（>${Math.round(timeoutMs / 1000)} 秒）。`);
+        }
+        throw error;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
     async function logWithOptions(message, level = 'info', options = {}) {
       if (typeof addLog !== 'function') {
         return;
@@ -150,28 +245,41 @@
       if (!adminKey) {
         throw new Error('尚未配置 Codex2API 管理密钥，请先在侧边栏填写。');
       }
-      const account = buildCodex2ApiAtAccountPayload(state);
-      const logLabel = normalizeString(options.logLabel) || 'Codex2API AT 导入';
+      const artifact = buildCodex2ApiSessionImportArtifact(state, options);
+      const logLabel = normalizeString(options.logLabel) || 'Codex2API SESSION JSON 导入';
 
-      await logWithOptions(`${logLabel}：正在通过 Codex2API AT 接口导入当前 ChatGPT 会话...`, 'info', options);
-      await fetchCodex2ApiJson(state?.codex2apiUrl, '/api/admin/accounts/at', {
+      await logWithOptions(`${logLabel}：正在通过 Codex2API JSON 导入当前 ChatGPT 会话...`, 'info', options);
+      if (!artifact.hasRefreshToken) {
+        await logWithOptions(`${logLabel}：未包含 refresh_token，access_token 过期后无法自动续期。`, 'warn', options);
+      }
+      await fetchCodex2ApiMultipart(state?.codex2apiUrl, '/api/admin/accounts/import', {
         method: 'POST',
         adminKey,
-        body: account.payload,
+        fields: { format: 'json' },
+        files: [{
+          fieldName: 'file',
+          fileName: artifact.fileName,
+          content: artifact.jsonText,
+          type: 'application/json',
+        }],
         timeoutMs: options.importTimeoutMs || options.timeoutMs,
       });
 
-      const verifiedStatus = `Codex2API AT 导入完成：${account.name}`;
+      const verifiedStatus = `Codex2API SESSION JSON 导入完成：${artifact.email || artifact.fileName}`;
       await logWithOptions(verifiedStatus, 'ok', options);
       return {
         verifiedStatus,
-        codex2apiImportedAccountName: account.name,
+        codex2apiImportedAccountName: artifact.name,
+        codex2apiImportedEmail: artifact.email || null,
+        codex2apiImportedFileName: artifact.fileName,
       };
     }
 
     return {
       buildCodex2ApiAtAccountPayload,
+      buildCodex2ApiSessionImportArtifact,
       fetchCodex2ApiJson,
+      fetchCodex2ApiMultipart,
       importCurrentChatGptSession,
       resolveAccountName,
       resolveCodex2ApiEndpoint,
