@@ -58,6 +58,7 @@ const btnFetchEmail = document.getElementById('btn-fetch-email');
 const btnTogglePassword = document.getElementById('btn-toggle-password');
 const btnExportCurrentSessionCpaJson = document.getElementById('btn-export-current-session-cpa-json');
 const btnExportCurrentSessionSub2Json = document.getElementById('btn-export-current-session-sub2-json');
+const btnExportCurrentSessionCodexProxyAtJson = document.getElementById('btn-export-current-session-codexproxy-at-json');
 const btnSaveSettings = document.getElementById('btn-save-settings');
 const btnStop = document.getElementById('btn-stop');
 const btnReset = document.getElementById('btn-reset');
@@ -584,6 +585,7 @@ const BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY = '2KwVxE6f0ABH002JLkoQJ9Re
 const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX2API_CODEX_SESSION = 'codex2api_codex_session';
 const ACCOUNT_ACCESS_STRATEGY_UI_OAUTH = 'oauth';
 const ACCOUNT_ACCESS_STRATEGY_UI_SESSION_JSON = 'session_json';
 const DEFAULT_GPC_HELPER_API_URL = 'https://your-gpc-helper-domain.example';
@@ -1050,6 +1052,7 @@ function rebuildStepDefinitionState(plusModeEnabled = false, options = {}) {
       return [
         'sub2api_codex_session',
         'cpa_codex_session',
+        'codex2api_codex_session',
       ].includes(normalized) ? normalized : 'oauth';
     });
   currentPlusPaymentMethod = normalizePlusPaymentMethod(rawPaymentMethod);
@@ -2446,6 +2449,7 @@ function setCurrentSessionExportButtonsDisabled(disabled) {
   [
     btnExportCurrentSessionCpaJson,
     btnExportCurrentSessionSub2Json,
+    btnExportCurrentSessionCodexProxyAtJson,
   ].forEach((button) => {
     if (button) {
       button.disabled = Boolean(disabled);
@@ -2454,9 +2458,10 @@ function setCurrentSessionExportButtonsDisabled(disabled) {
 }
 
 async function exportCurrentSessionJson(format) {
-  const normalizedFormat = String(format || '').trim().toLowerCase() === 'sub2'
+  const rawFormat = String(format || '').trim().toLowerCase();
+  const normalizedFormat = rawFormat === 'sub2'
     ? 'sub2'
-    : 'cpa';
+    : (rawFormat === 'codexproxy' ? 'codexproxy' : 'cpa');
   setCurrentSessionExportButtonsDisabled(true);
   try {
     const response = await chrome.runtime.sendMessage({
@@ -2471,7 +2476,9 @@ async function exportCurrentSessionJson(format) {
       throw new Error('后台未返回可下载的 SESSION JSON。');
     }
     downloadTextFile(response.fileContent, response.fileName);
-    const label = normalizedFormat === 'sub2' ? 'SUB2 JSON' : 'CPA JSON';
+    const label = normalizedFormat === 'sub2'
+      ? 'SUB2 JSON'
+      : (normalizedFormat === 'codexproxy' ? 'CodexProxy AT' : 'CPA JSON');
     showToast(`已导出当前 SESSION：${label}`, 'success', 1800);
     (response.warnings || []).forEach((warning) => {
       if (warning) {
@@ -8338,6 +8345,9 @@ function normalizePlusAccountAccessStrategy(value = '') {
   if (normalized === PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION) {
     return PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION;
   }
+  if (normalized === PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX2API_CODEX_SESSION) {
+    return PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX2API_CODEX_SESSION;
+  }
   return PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
 }
 
@@ -8366,6 +8376,9 @@ function getAccountAccessStrategyUiValueForState(state = latestState) {
   if (panelMode === 'cpa' && strategy === PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION) {
     return ACCOUNT_ACCESS_STRATEGY_UI_SESSION_JSON;
   }
+  if (panelMode === 'codex2api' && strategy === PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX2API_CODEX_SESSION) {
+    return ACCOUNT_ACCESS_STRATEGY_UI_SESSION_JSON;
+  }
   return ACCOUNT_ACCESS_STRATEGY_UI_OAUTH;
 }
 
@@ -8390,6 +8403,9 @@ function resolvePlusAccountAccessStrategyFromExportAndStrategy(exportTarget = ''
   if (target === 'cpa') {
     return PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION;
   }
+  if (target === 'codex2api') {
+    return PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX2API_CODEX_SESSION;
+  }
   return PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
 }
 
@@ -8411,9 +8427,7 @@ function getSelectedAccountAccessStrategyUiValue() {
 
 function getSelectedExportSettings() {
   const exportTarget = getSelectedExportTarget();
-  const strategyUiValue = exportTarget === 'codex2api'
-    ? ACCOUNT_ACCESS_STRATEGY_UI_OAUTH
-    : getSelectedAccountAccessStrategyUiValue();
+  const strategyUiValue = getSelectedAccountAccessStrategyUiValue();
   return {
     exportTarget,
     strategyUiValue,
@@ -9851,6 +9865,7 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
       return [
         'sub2api_codex_session',
         'cpa_codex_session',
+        'codex2api_codex_session',
       ].includes(normalized) ? normalized : 'oauth';
     });
   const nextAccountAccessStrategy = normalizeAccountAccessStrategySafe(rawAccountAccessStrategy);
@@ -12209,9 +12224,6 @@ function updatePanelModeUI() {
   let rawStrategyUiValue = normalizeAccountAccessStrategyUiValue(
     selectAccountAccessStrategy?.value || getAccountAccessStrategyUiValueForState(latestState)
   );
-  if (rawExportTarget === 'codex2api') {
-    rawStrategyUiValue = ACCOUNT_ACCESS_STRATEGY_UI_OAUTH;
-  }
   const rawPanelMode = resolvePanelModeFromExportAndStrategy(rawExportTarget, rawStrategyUiValue);
   const rawPlusAccountAccessStrategy = resolvePlusAccountAccessStrategyFromExportAndStrategy(
     rawExportTarget,
@@ -12262,16 +12274,14 @@ function updatePanelModeUI() {
     ? ACCOUNT_ACCESS_STRATEGY_UI_SESSION_JSON
     : (capabilityState?.effectivePlusAccountAccessStrategy === PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION
       || capabilityState?.effectivePlusAccountAccessStrategy === PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION
+      || capabilityState?.effectivePlusAccountAccessStrategy === PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX2API_CODEX_SESSION
       ? ACCOUNT_ACCESS_STRATEGY_UI_SESSION_JSON
       : rawStrategyUiValue);
-  if (exportTarget === 'codex2api') {
-    strategyUiValue = ACCOUNT_ACCESS_STRATEGY_UI_OAUTH;
-  }
   if (selectAccountAccessStrategy) {
     selectAccountAccessStrategy.value = strategyUiValue;
-    const lockStrategy = exportTarget === 'codex2api';
+    const lockStrategy = false;
     selectAccountAccessStrategy.disabled = lockStrategy;
-    selectAccountAccessStrategy.title = lockStrategy ? 'Codex2API 仅支持 OAuth' : '';
+    selectAccountAccessStrategy.title = '';
     Array.from(selectAccountAccessStrategy.options || []).forEach((option) => {
       if (option.value === ACCOUNT_ACCESS_STRATEGY_UI_SESSION_JSON) {
         const sessionStrategy = resolvePlusAccountAccessStrategyFromExportAndStrategy(exportTarget, ACCOUNT_ACCESS_STRATEGY_UI_SESSION_JSON);
@@ -12289,9 +12299,7 @@ function updatePanelModeUI() {
     rowAccountAccessStrategy.style.display = '';
   }
   if (accountAccessStrategyCaption) {
-    accountAccessStrategyCaption.textContent = exportTarget === 'codex2api'
-      ? '仅支持 OAuth'
-      : '';
+    accountAccessStrategyCaption.textContent = '';
   }
   const useLocalCpaJson = panelMode === LOCAL_CPA_JSON_PANEL_MODE || panelMode === LOCAL_CPA_JSON_NO_RT_PANEL_MODE;
   const useLocalCpaJsonNoRt = panelMode === LOCAL_CPA_JSON_NO_RT_PANEL_MODE;
@@ -14131,6 +14139,10 @@ btnExportCurrentSessionSub2Json?.addEventListener('click', () => {
   exportCurrentSessionJson('sub2');
 });
 
+btnExportCurrentSessionCodexProxyAtJson?.addEventListener('click', () => {
+  exportCurrentSessionJson('codexproxy');
+});
+
 // Save settings on change
 inputEmail.addEventListener('change', async () => {
   if (selectMailProvider.value === 'hotmail-api' || isLuckmailProvider()) {
@@ -14525,9 +14537,6 @@ selectPanelMode.addEventListener('change', async () => {
   try {
     const nextExportTarget = getExportTargetForPanelMode(selectPanelMode.value);
     selectPanelMode.value = nextExportTarget;
-    if (nextExportTarget === 'codex2api' && selectAccountAccessStrategy) {
-      selectAccountAccessStrategy.value = ACCOUNT_ACCESS_STRATEGY_UI_OAUTH;
-    }
     updatePanelModeUI();
     const nextExportSettings = getSelectedExportSettings();
     const nextPanelMode = getSelectedPanelMode();
@@ -14577,11 +14586,7 @@ selectAccountAccessStrategy?.addEventListener('change', async () => {
   const previousExportTarget = getExportTargetForPanelMode(previousPanelMode);
   const previousStrategyUiValue = getAccountAccessStrategyUiValueForState(latestState);
   try {
-    if (getSelectedExportTarget() === 'codex2api') {
-      selectAccountAccessStrategy.value = ACCOUNT_ACCESS_STRATEGY_UI_OAUTH;
-    } else {
-      selectAccountAccessStrategy.value = normalizeAccountAccessStrategyUiValue(selectAccountAccessStrategy.value);
-    }
+    selectAccountAccessStrategy.value = normalizeAccountAccessStrategyUiValue(selectAccountAccessStrategy.value);
     const nextExportSettings = getSelectedExportSettings();
     const confirmed = await confirmCpaPhoneSignupIfNeeded({
       signupMethod: getSelectedSignupMethod(),
