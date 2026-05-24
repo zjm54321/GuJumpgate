@@ -2899,6 +2899,7 @@ const {
 } = cloudMailProvider;
 const outlookEmailPlusProvider = self.MultiPageBackgroundOutlookEmailPlusProvider.createOutlookEmailPlusProvider({
   addLog,
+  broadcastDataUpdate,
   buildOutlookEmailPlusAliasAddress,
   buildOutlookEmailPlusHeaders,
   buildOutlookEmailPlusPayPalAliasAddress,
@@ -2914,11 +2915,13 @@ const outlookEmailPlusProvider = self.MultiPageBackgroundOutlookEmailPlusProvide
   normalizeOutlookEmailPlusProjectKey,
   normalizeOutlookEmailPlusProvider,
   normalizeOutlookEmailPlusVerificationCode,
+  normalizeHotmailAliasUsage,
   OUTLOOK_EMAIL_PLUS_GENERATOR,
   OUTLOOK_EMAIL_PLUS_PROVIDER,
   getState,
   persistRegistrationEmailState,
   setEmailState,
+  setPersistentSettings,
   setState,
   sleepWithStop,
   throwIfStopped,
@@ -3688,8 +3691,17 @@ async function initializeSessionStorageAccess() {
   }
 }
 
+const STATE_LOG_REDACTED_VALUE = '[redacted]';
+const STATE_LOG_SECRET_KEY_PATTERN = /(api[_-]?key|password|secret|token)/i;
+
+function stringifyStateUpdatesForLog(updates) {
+  return JSON.stringify(updates, (key, value) => (
+    STATE_LOG_SECRET_KEY_PATTERN.test(key) ? STATE_LOG_REDACTED_VALUE : value
+  ));
+}
+
 async function setState(updates) {
-  console.log(LOG_PREFIX, 'storage.set:', JSON.stringify(updates).slice(0, 200));
+  console.log(LOG_PREFIX, 'storage.set:', stringifyStateUpdatesForLog(updates).slice(0, 200));
   if (Object.keys(updates || {}).length > 0) {
     const currentSessionState = await chrome.storage.session.get(null);
     const sessionUpdates = buildStatePatchWithRuntimeState({
